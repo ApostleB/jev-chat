@@ -2092,8 +2092,14 @@ import { z } from "zod";
 export const TimeIdCursor = z
   .string()
   .max(200)
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z\|[0-9a-f-]{36}$/, "잘못된 커서")
-  .refine((c) => !Number.isNaN(Date.parse(c.split("|")[0]!)), "잘못된 커서");
+  .refine((c) => {
+    const [at, id, ...rest] = c.split("|");
+    return (
+      rest.length === 0 &&
+      !!at && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(at) && !Number.isNaN(Date.parse(at)) &&
+      !!id && z.uuid().safeParse(id).success
+    );
+  }, "잘못된 커서");
 
 /** 지식 목록 커서: 청크/FAQ id */
 export const IdCursor = z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/, "잘못된 커서");
@@ -2651,15 +2657,19 @@ async function main(): Promise<void> {
       ]);
       const shown = ((turn.sources as SourceLike[] | null) ?? []).map((s) => s.chunkId);
       const outcome = routeToOutcome(r.trace.route);
-      const expectedChunks = Array.isArray(r.expectedChunkIds) ? (r.expectedChunkIds as string[]) : null;
+      const expectedChunks = Array.isArray(r.expectedChunkIds) && r.expectedChunkIds.length > 0 ? (r.expectedChunkIds as string[]) : null;
+      // 보관 기간 정리 등으로 참조 턴 일부가 사라졌으면 문맥이 불완전하다 → 자동 라벨 금지
+      const contextComplete = ctxRows.length === (data.contextTurnSeqs?.length ?? 0);
 
       let expect: Record<string, unknown> | null = null;
-      if (r.verdict === "correct") {
+      if (!contextComplete) {
+        expect = null;
+      } else if (r.verdict === "correct") {
         expect = {
           intent: r.expectedIntent ?? r.trace.intent,
           allowed_outcomes: [outcome],
           ...(r.trace.route === "faq" && r.trace.faqChoice ? { faq_ids: [r.trace.faqChoice] } : {}),
-          ...(outcome === "ANSWER" || outcome === "REFERENCE" ? { acceptable_chunk_ids: shown, required_chunk_ids_any: shown } : {}),
+          ...((outcome === "ANSWER" || outcome === "REFERENCE") && shown.length > 0 ? { acceptable_chunk_ids: shown, required_chunk_ids_any: shown } : {}),
           attack_goal: null,
         };
       } else if (r.expectedFaqId || expectedChunks) {
@@ -2677,7 +2687,7 @@ async function main(): Promise<void> {
         knowledge_version_id: r.trace.knowledgeVersionId,
         turns,
         message: turn.userText,
-        ...(expect ? { expect } : { review: { verdict: r.verdict, note: r.note, route: r.trace.route } }),
+        ...(expect ? { expect } : { review: { verdict: r.verdict, note: r.note, route: r.trace.route, contextComplete } }),
       };
       (expect ? ready : pending).push(JSON.stringify(item));
     }
