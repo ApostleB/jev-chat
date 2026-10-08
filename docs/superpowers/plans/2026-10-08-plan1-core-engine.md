@@ -1677,7 +1677,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `decideFromTurn(policy: Policy, turn: JudgeOutcome<TurnJudgment> | null, faqCandidates: FaqCandidate[]): RouteDecision | null` — 규칙 1~5. null이면 B 결과가 필요
   - `decideFromRelevance(policy: Policy, scored: ScoredChunk[], bStatus: BStatus): RouteDecision` — 규칙 6~9
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/core/routing/router.spec.ts`:
 ```ts
@@ -1780,12 +1780,12 @@ describe("decideFromRelevance (규칙 6~9)", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- router`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `jev-chat-api/src/core/routing/router.ts`:
 ```ts
@@ -1855,12 +1855,12 @@ export function decideFromRelevance(policy: Policy, scored: ScoredChunk[], bStat
 }
 ```
 
-- [ ] **Step 4: 실행 → 통과 확인**
+- [x] **Step 4: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck`
 Expected: PASS, 타입 오류 없음
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add jev-chat-api
