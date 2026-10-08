@@ -508,7 +508,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Produces (tokenizer.ts): `tokenize(text: string): string[]`
 - Produces (bm25.ts): `class Bm25Index` — `constructor(docs: { id: string; text: string }[], opts?: { k1?: number; b?: number })`, `search(query: string, k: number): Bm25Hit[]`, `type Bm25Hit = { id: string; score: number; rank: number }`
 
-- [ ] **Step 1: 패키지 설정 작성**
+- [x] **Step 1: 패키지 설정 작성**
 
 `jev-chat-api/package.json`:
 ```json
@@ -558,7 +558,7 @@ export default defineConfig({
 
 설치: `pnpm install`
 
-- [ ] **Step 2: 도메인 타입과 기본 정책 작성** (테스트 대상 로직 없음 — 다음 Step의 테스트에서 사용)
+- [x] **Step 2: 도메인 타입과 기본 정책 작성** (테스트 대상 로직 없음 — 다음 Step의 테스트에서 사용)
 
 `jev-chat-api/src/core/domain/types.ts`:
 ```ts
@@ -654,7 +654,7 @@ export const DEFAULT_POLICY: Policy = {
 };
 ```
 
-- [ ] **Step 3: 토크나이저 실패 테스트 작성**
+- [x] **Step 3: 토크나이저 실패 테스트 작성**
 
 `jev-chat-api/src/core/retrieval/tokenizer.spec.ts`:
 ```ts
@@ -688,12 +688,12 @@ describe("tokenize", () => {
 });
 ```
 
-- [ ] **Step 4: 실행 → 실패 확인**
+- [x] **Step 4: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- tokenizer`
 Expected: FAIL — `Cannot find module './tokenizer'`
 
-- [ ] **Step 5: 토크나이저 구현**
+- [x] **Step 5: 토크나이저 구현**
 
 `jev-chat-api/src/core/retrieval/tokenizer.ts`:
 ```ts
@@ -722,12 +722,12 @@ export function tokenize(text: string): string[] {
 }
 ```
 
-- [ ] **Step 6: 실행 → 통과 확인**
+- [x] **Step 6: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test -- tokenizer`
 Expected: PASS (7 tests)
 
-- [ ] **Step 7: BM25 실패 테스트 작성**
+- [x] **Step 7: BM25 실패 테스트 작성**
 
 `jev-chat-api/src/core/retrieval/bm25.spec.ts`:
 ```ts
@@ -775,12 +775,12 @@ describe("Bm25Index", () => {
 });
 ```
 
-- [ ] **Step 8: 실행 → 실패 확인**
+- [x] **Step 8: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- bm25`
 Expected: FAIL — `Cannot find module './bm25'`
 
-- [ ] **Step 9: BM25 구현**
+- [x] **Step 9: BM25 구현**
 
 `jev-chat-api/src/core/retrieval/bm25.ts`:
 ```ts
@@ -843,12 +843,12 @@ export class Bm25Index {
 }
 ```
 
-- [ ] **Step 10: 실행 → 통과 + 타입검사**
+- [x] **Step 10: 실행 → 통과 + 타입검사**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck`
 Expected: PASS (14 tests), 타입 오류 없음
 
-- [ ] **Step 11: 커밋**
+- [x] **Step 11: 커밋**
 
 ```bash
 git add jev-chat-api pnpm-lock.yaml
