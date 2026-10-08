@@ -113,111 +113,123 @@ export class ChatEngine {
     // ③ A와 B를 동시에 시작
     onProgress({ stage: "judging" });
     const bController = linkedController(signal);
-    const turnStart = this.now();
-    const turnPromise = this.deps.judge.judgeTurn(
-      { message: input.text, recentTurns: ctx.recentTurns, faqCandidates, intents: snapshot.intents },
-      signal,
-    );
-    let relevanceEnd: number | null = null;
-    const relevancePromises: Promise<RelevanceSettled>[] = chunkCandidates.map((candidate) =>
-      raceWithAbort<RelevanceSettled>(
-        this.deps.judge
-          .judgeRelevance({ message: input.text, recentTurns: ctx.recentTurns, chunk: candidate.chunk }, bController.signal)
-          .then((outcome) => ({ candidate, outcome })),
+    try {
+      const turnStart = this.now();
+      const turnPromise = this.deps.judge.judgeTurn(
+        { message: input.text, recentTurns: ctx.recentTurns, faqCandidates, intents: snapshot.intents },
+        signal,
+      );
+      let relevanceEnd: number | null = null;
+      const relevancePromises: Promise<RelevanceSettled>[] = chunkCandidates.map((candidate) => {
+      // 동기 throw도 rejection으로 바꿔 map이 끊기지 않게 한다(A와 B는 같은 동기 구간에서 시작)
+      const p = raceWithAbort<RelevanceSettled>(
+        (async () => ({
+          candidate,
+          outcome: await this.deps.judge.judgeRelevance({ message: input.text, recentTurns: ctx.recentTurns, chunk: candidate.chunk }, bController.signal),
+        }))(),
         bController.signal,
         () => ({ candidate, outcome: "aborted" }),
-      ),
-    );
+      );
+      // 아무도 기다리지 않게 되어도 unhandledRejection이 생기지 않게 한다(Promise.all 경로는 그대로 전파)
+      p.catch(() => {});
+      return p;
+    });
 
     const turnOutcome = await raceWithAbort<JudgeOutcome<TurnJudgment> | null>(turnPromise, signal, () => null);
-    const turnEnd = this.now();
+      const turnEnd = this.now();
 
-    // ④ FAQ 조기 확정 / 종료 검사
-    let decision: RouteDecision | null = decideFromTurn(policy, turnOutcome, faqCandidates);
-    let settled: RelevanceSettled[] = [];
-    let bStatus: BStatus;
-    if (decision) {
-      bController.abort();
-      bStatus = chunkCandidates.length === 0 ? "empty" : "skipped";
-    } else {
-      settled = await Promise.all(relevancePromises);
-      relevanceEnd = this.now();
-      bStatus = this.bStatusOf(chunkCandidates.length, settled);
-      const scored: ScoredChunk[] = settled.flatMap((s) =>
-        s.outcome !== "aborted" && s.outcome.ok ? [{ candidate: s.candidate, relevance: s.outcome.value }] : [],
+      // ④ FAQ 조기 확정 / 종료 검사
+      let decision: RouteDecision | null = decideFromTurn(policy, turnOutcome, faqCandidates);
+      let settled: RelevanceSettled[] = [];
+      let bStatus: BStatus;
+      if (decision) {
+        bController.abort();
+        // 이미 끝난 B는 실제 결과로, 진행 중이던 B는 aborted로 trace에 남긴다
+        settled = await Promise.all(relevancePromises);
+        bStatus = chunkCandidates.length === 0 ? "empty" : "skipped";
+      } else {
+        settled = await Promise.all(relevancePromises);
+        relevanceEnd = this.now();
+        bStatus = this.bStatusOf(chunkCandidates.length, settled);
+        const scored: ScoredChunk[] = settled.flatMap((s) =>
+          s.outcome !== "aborted" && s.outcome.ok ? [{ candidate: s.candidate, relevance: s.outcome.value }] : [],
+        );
+        decision = decideFromRelevance(policy, scored, bStatus);
+      }
+
+      // ⑤ 답변
+      onProgress({ stage: "answering" });
+      const judgment = turnOutcome?.ok ? turnOutcome.value : null;
+      const showHelpdesk = judgment ? needsHelpdesk(policy, judgment.intent.probabilities) : false;
+      const answer = await this.deps.answerer.answer(
+        { decision, helpdesk: snapshot.helpdesk, showHelpdesk, knowledge: snapshot.knowledge },
+        signal,
       );
-      decision = decideFromRelevance(policy, scored, bStatus);
+
+      const jevCalls: JevCallAudit[] = [
+        ...(turnOutcome ? [turnOutcome.audit] : [{ call: "turn" as const, status: "aborted" as const, attempts: 0, latencyMs: turnEnd - turnStart, errorKind: "timeout" as const }]),
+        ...settled.map((s) =>
+          s.outcome === "aborted"
+            ? { call: "relevance" as const, chunkId: s.candidate.chunk.id, status: "aborted" as const, attempts: 0, latencyMs: 0 }
+            : s.outcome.audit,
+        ),
+      ];
+      const relevanceById = new Map(settled.map((s) => [s.candidate.chunk.id, s.outcome]));
+      const faqProbs = judgment?.faq?.probabilities ?? {};
+
+      const trace: TraceRecord = {
+        knowledgeVersionId: snapshot.knowledgeVersionId,
+        templateVersion: snapshot.templateVersion,
+        model: turnOutcome?.audit.model ?? null,
+        policy,
+        contextTurnSeqs: ctx.turnSeqs,
+        intent: judgment?.intent.choice ?? null,
+        intentProbs: judgment?.intent.probabilities ?? null,
+        inScope: judgment ? inScopeProbability(judgment.intent.probabilities) : null,
+        ambiguity: judgment?.ambiguity ?? null,
+        faqChoice: judgment?.faq?.choice ?? null,
+        faqProb: judgment?.faq ? (judgment.faq.probabilities[judgment.faq.choice] ?? null) : null,
+        faqConfidence: judgment?.faq?.confidence ?? null,
+        route: decision.route,
+        retrieval: {
+          faqQuery: queries.faq,
+          chunkQueries: queries.chunks,
+          faqCandidateIds: faqCandidates.map((c) => c.faq.id),
+          chunkCandidateIds: chunkCandidates.map((c) => c.chunk.id),
+        },
+        candidates: [
+          ...faqCandidates.map((c) => ({
+            kind: "faq" as const,
+            id: c.faq.id,
+            bm25Rank: c.bm25Rank,
+            bm25Score: c.bm25Score,
+            ...(c.faq.id in faqProbs ? { faqProb: faqProbs[c.faq.id] } : {}),
+          })),
+          ...chunkCandidates.map((c) => {
+            const o = relevanceById.get(c.chunk.id);
+            const base = { kind: "chunk" as const, id: c.chunk.id, contentHash: c.chunk.contentHash, bm25Rank: c.bm25Rank, bm25Score: c.bm25Score };
+            if (o === undefined) return { ...base, status: "skipped" as const };
+            if (o === "aborted") return { ...base, status: "aborted" as const };
+            return o.ok ? { ...base, relevance: o.value, status: "ok" as const } : { ...base, status: "failed" as const };
+          }),
+        ],
+        bStatus,
+        jevCalls,
+        latencyMs: {
+          retrieval: tRetrieval - t0,
+          turn: turnEnd - turnStart,
+          relevance: relevanceEnd === null ? null : relevanceEnd - turnStart,
+          total: this.now() - t0,
+        },
+        totalInputTokens: jevCalls.reduce((sum, c) => sum + (c.usage?.inputTokens ?? 0), 0),
+        errorCode: decision.route === "error" ? "JEV_UNAVAILABLE" : null,
+      };
+
+      return { route: decision.route, text: answer.text, sources: answer.sources, trace };
+    } finally {
+      // 정상·예외 어느 쪽이든 남은 B 호출을 정리한다(이미 끝난 B에는 영향 없음)
+      bController.abort();
     }
-
-    // ⑤ 답변
-    onProgress({ stage: "answering" });
-    const judgment = turnOutcome?.ok ? turnOutcome.value : null;
-    const showHelpdesk = judgment ? needsHelpdesk(policy, judgment.intent.probabilities) : false;
-    const answer = await this.deps.answerer.answer(
-      { decision, helpdesk: snapshot.helpdesk, showHelpdesk, knowledge: snapshot.knowledge },
-      signal,
-    );
-
-    const jevCalls: JevCallAudit[] = [
-      ...(turnOutcome ? [turnOutcome.audit] : [{ call: "turn" as const, status: "aborted" as const, attempts: 0, latencyMs: turnEnd - turnStart, errorKind: "timeout" as const }]),
-      ...settled.map((s) =>
-        s.outcome === "aborted"
-          ? { call: "relevance" as const, chunkId: s.candidate.chunk.id, status: "aborted" as const, attempts: 0, latencyMs: 0 }
-          : s.outcome.audit,
-      ),
-    ];
-    const relevanceById = new Map(settled.map((s) => [s.candidate.chunk.id, s.outcome]));
-    const faqProbs = judgment?.faq?.probabilities ?? {};
-
-    const trace: TraceRecord = {
-      knowledgeVersionId: snapshot.knowledgeVersionId,
-      templateVersion: snapshot.templateVersion,
-      model: turnOutcome?.audit.model ?? null,
-      policy,
-      contextTurnSeqs: ctx.turnSeqs,
-      intent: judgment?.intent.choice ?? null,
-      intentProbs: judgment?.intent.probabilities ?? null,
-      inScope: judgment ? inScopeProbability(judgment.intent.probabilities) : null,
-      ambiguity: judgment?.ambiguity ?? null,
-      faqChoice: judgment?.faq?.choice ?? null,
-      faqProb: judgment?.faq ? (judgment.faq.probabilities[judgment.faq.choice] ?? null) : null,
-      faqConfidence: judgment?.faq?.confidence ?? null,
-      route: decision.route,
-      retrieval: {
-        faqQuery: queries.faq,
-        chunkQueries: queries.chunks,
-        faqCandidateIds: faqCandidates.map((c) => c.faq.id),
-        chunkCandidateIds: chunkCandidates.map((c) => c.chunk.id),
-      },
-      candidates: [
-        ...faqCandidates.map((c) => ({
-          kind: "faq" as const,
-          id: c.faq.id,
-          bm25Rank: c.bm25Rank,
-          bm25Score: c.bm25Score,
-          ...(c.faq.id in faqProbs ? { faqProb: faqProbs[c.faq.id] } : {}),
-        })),
-        ...chunkCandidates.map((c) => {
-          const o = relevanceById.get(c.chunk.id);
-          const base = { kind: "chunk" as const, id: c.chunk.id, contentHash: c.chunk.contentHash, bm25Rank: c.bm25Rank, bm25Score: c.bm25Score };
-          if (o === undefined) return { ...base, status: "skipped" as const };
-          if (o === "aborted") return { ...base, status: "aborted" as const };
-          return o.ok ? { ...base, relevance: o.value, status: "ok" as const } : { ...base, status: "failed" as const };
-        }),
-      ],
-      bStatus,
-      jevCalls,
-      latencyMs: {
-        retrieval: tRetrieval - t0,
-        turn: turnEnd - turnStart,
-        relevance: relevanceEnd === null ? null : relevanceEnd - turnStart,
-        total: this.now() - t0,
-      },
-      totalInputTokens: jevCalls.reduce((sum, c) => sum + (c.usage?.inputTokens ?? 0), 0),
-      errorCode: decision.route === "error" ? "JEV_UNAVAILABLE" : null,
-    };
-
-    return { route: decision.route, text: answer.text, sources: answer.sources, trace };
   }
 
   private bStatusOf(count: number, settled: RelevanceSettled[]): BStatus {

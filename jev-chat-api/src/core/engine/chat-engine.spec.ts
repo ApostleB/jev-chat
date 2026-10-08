@@ -162,4 +162,76 @@ describe("ChatEngine", () => {
     expect(r.trace.model).toBe("jev-1.13.0");
     expect(r.trace.jevCalls.length).toBe(1 + judge.relevanceCalls.length);
   });
+
+  it("FAQ 조기 확정이어도 이미 보낸 B 호출은 jevCalls·토큰·candidates에 남는다", async () => {
+    let releaseTurn!: () => void;
+    const turnGate = new Promise<void>((r) => (releaseTurn = r));
+    const judge = new FakeJudge(
+      async () => {
+        await turnGate;
+        return okTurn({ regulation: 1 }, { inputTokens: 100, faq: { choice: "faq-card", confidence: 0.9, probabilities: { "faq-card": 0.92, none: 0.08 } } });
+      },
+      (req, signal) => (req.chunk.id === "card-1" ? Promise.resolve(okRelevance("card-1", 0.2, 50)) : hangUntilAbort(signal, () => okRelevance(req.chunk.id, 0))),
+    );
+    const p = engine(judge).handle(input("법인카드 회식비"));
+    await new Promise((r) => setTimeout(r, 5));
+    releaseTurn();
+    const r = await p;
+    expect(r.route).toBe("faq");
+    expect(r.trace.bStatus).toBe("skipped");
+    expect(r.trace.jevCalls.length).toBe(1 + r.trace.retrieval.chunkCandidateIds.length);
+    expect(r.trace.totalInputTokens).toBe(100 + 50);
+    expect(r.trace.candidates.find((c) => c.id === "card-1")).toMatchObject({ status: "ok", relevance: 0.2 });
+    expect(r.trace.candidates.find((c) => c.id === "card-2")).toMatchObject({ status: "aborted" });
+  });
+
+  it("judgeTurn이 reject하면 handle도 reject하고 진행 중인 B는 abort된다", async () => {
+    const judge = new FakeJudge(
+      async () => {
+        throw new Error("boom");
+      },
+      (req, signal) => hangUntilAbort(signal, () => okRelevance(req.chunk.id, 0)),
+    );
+    await expect(engine(judge).handle(input("법인카드 회식비"))).rejects.toThrow("boom");
+    expect(judge.abortedRelevance.length).toBeGreaterThan(0);
+  });
+
+  it("A가 reject한 뒤 B가 늦게 reject해도 unhandled rejection이 없다", async () => {
+    let bRejected = 0;
+    const judge = new FakeJudge(
+      async () => {
+        throw new Error("boom");
+      },
+      () =>
+        new Promise((_resolve, reject) =>
+          setTimeout(() => {
+            bRejected++;
+            reject(new Error("late"));
+          }, 5),
+        ),
+    );
+    await expect(engine(judge).handle(input("법인카드 회식비"))).rejects.toThrow("boom");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(bRejected).toBeGreaterThan(0);
+  });
+
+  it("judgeRelevance가 동기로 throw해도 handle만 reject하고 unhandled rejection이 없다", async () => {
+    let lateRejected = 0;
+    const judge = new FakeJudge(
+      async () => okTurn({ regulation: 1 }),
+      (req) => {
+        if (req.chunk.id === "card-2") throw new Error("sync boom");
+        return new Promise((_resolve, reject) =>
+          setTimeout(() => {
+            lateRejected++;
+            reject(new Error("late"));
+          }, 5),
+        );
+      },
+    );
+    await expect(engine(judge).handle(input("법인카드 회식비"))).rejects.toThrow();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(judge.relevanceCalls).toHaveLength(2);
+    expect(lateRejected).toBeGreaterThan(0);
+  });
 });
