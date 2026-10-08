@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { TypesafeJudge } from "./typesafe-judge";
+import { describe, expect, it, vi } from "vitest";
+import { abortableSleep, TypesafeJudge } from "./typesafe-judge";
 import { JevLimiter } from "./limiter";
 import { JevTransportError, type JevTransport, type JevTransportResult } from "./transport";
 import { DEFAULT_INTENTS, JevResponseError, type JevRequest, type Chunk } from "../../core";
@@ -165,5 +165,32 @@ describe("TypesafeJudge.judgeRelevance", () => {
     const r = await judge(t).judgeRelevance({ message: "q", recentTurns: [], chunk }, signal());
     expect(r).toMatchObject({ ok: true, value: 0.87 });
     expect(r.audit).toMatchObject({ call: "relevance", chunkId: "c1" });
+  });
+});
+
+describe("abortableSleep (Codex T3)", () => {
+  it("정상 만료 시 abort 리스너를 제거한다", async () => {
+    const ctrl = new AbortController();
+    const add = vi.spyOn(ctrl.signal, "addEventListener");
+    const remove = vi.spyOn(ctrl.signal, "removeEventListener");
+    await abortableSleep(5, ctrl.signal);
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove.mock.calls[0]?.[1]).toBe(add.mock.calls[0]?.[1]);
+  });
+
+  it("대기 중 abort되면 즉시 끝나고 타이머를 정리한다", async () => {
+    const ctrl = new AbortController();
+    const p = abortableSleep(60_000, ctrl.signal);
+    ctrl.abort();
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("이미 abort된 신호는 리스너 없이 즉시 끝난다", async () => {
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const add = vi.spyOn(ctrl.signal, "addEventListener");
+    await abortableSleep(60_000, ctrl.signal);
+    expect(add).not.toHaveBeenCalled();
   });
 });
