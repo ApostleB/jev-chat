@@ -78,7 +78,7 @@ jev-chat/
 **Interfaces:**
 - Produces: `@jev-chat/protocol` 패키지 — `RouteSchema`, `ErrorCodeSchema`, `MessageTextSchema`, `AckSchema(dataSchema)`, `TurnSchema`, `SourceRefSchema`, `SessionStartRequestSchema`, `SessionStartResponseSchema`, `ChatSendRequestSchema`, `ChatSendResponseSchema`, `ChatStatusEventSchema`, `ChatDoneEventSchema`, `ChatErrorEventSchema`, `ChatTraceEventSchema`, `PROTOCOL_VERSION = 1`, `MAX_PAYLOAD_BYTES = 8192`, `isWithinPayloadLimit(value: unknown): boolean`, 각 스키마의 `z.infer` 타입(`Route`, `ErrorCode`, `Turn`, `SourceRef`, `ChatSendRequest` …), `ClientToServerEvents`, `ServerToClientEvents` 인터페이스.
 
-- [ ] **Step 1: 루트 workspace 파일 작성**
+- [x] **Step 1: 루트 workspace 파일 작성**
 
 `package.json`:
 ```json
@@ -126,7 +126,7 @@ packages:
 }
 ```
 
-- [ ] **Step 2: protocol 패키지 설정 파일 작성**
+- [x] **Step 2: protocol 패키지 설정 파일 작성**
 
 `packages/protocol/package.json`:
 ```json
@@ -198,7 +198,7 @@ export default defineConfig({
 
 설치: `pnpm install` (루트에서). pnpm이 `Ignored build scripts: esbuild` 경고를 내면 `pnpm approve-builds`로 esbuild만 허용한다(승인 결과는 `pnpm-workspace.yaml`에 기록되므로 함께 커밋).
 
-- [ ] **Step 3: 실패하는 테스트 작성**
+- [x] **Step 3: 실패하는 테스트 작성**
 
 `packages/protocol/src/protocol.spec.ts`:
 ```ts
@@ -299,12 +299,12 @@ describe("상수와 크기 검사", () => {
 });
 ```
 
-- [ ] **Step 4: 테스트 실행 → 실패 확인**
+- [x] **Step 4: 테스트 실행 → 실패 확인**
 
 Run: `pnpm --filter @jev-chat/protocol test`
 Expected: FAIL — `Cannot find module './index'` 또는 export 없음
 
-- [ ] **Step 5: 구현 작성**
+- [x] **Step 5: 구현 작성**
 
 `packages/protocol/src/common.ts`:
 ```ts
@@ -478,12 +478,12 @@ export * from "./common";
 export * from "./events";
 ```
 
-- [ ] **Step 6: 테스트·타입검사·빌드 확인**
+- [x] **Step 6: 테스트·타입검사·빌드 확인**
 
 Run: `pnpm --filter @jev-chat/protocol test && pnpm --filter @jev-chat/protocol typecheck && pnpm --filter @jev-chat/protocol build`
 Expected: 테스트 전부 PASS, 타입 오류 없음, `packages/protocol/dist/{index.js,index.cjs,index.d.ts}` 생성
 
-- [ ] **Step 7: 커밋**
+- [x] **Step 7: 커밋**
 
 ```bash
 git add package.json pnpm-workspace.yaml pnpm-lock.yaml .nvmrc tsconfig.base.json packages/protocol
