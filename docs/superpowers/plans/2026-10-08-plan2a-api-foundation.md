@@ -1955,7 +1955,7 @@ export const PolicySchema = z.object({
   // [P8] 대화 문맥은 축소하지 않으므로 안전한 상한을 둔다
   context: z.object({ max_turns: PosInt.max(3), assistant_max_chars: PosInt.max(500) }),
   // [P10] 제한기 대기(limiter_ms)는 서버 설정(JEV_LIMITER_WAIT_MS)이라 팩에 두지 않는다
-  deadlines: z.object({ engine_ms: PosInt, queue_ms: PosInt, save_ms: PosInt }).strict(),
+  deadlines: z.object({ engine_ms: PosInt, queue_ms: PosInt, save_ms: PosInt.min(1000, "save_ms는 1000 이상(트랜잭션 대기+실행 분할 하한)") }).strict(),
 });
 
 export const IntentsSchema = z
@@ -2546,6 +2546,22 @@ describe.runIf(prisma)("TurnRepository (통합)", () => {
     expect(await prisma!.messageTrace.count({ where: { turnId: t.id } })).toBe(done !== null ? 1 : 0);
   });
 
+  it("[P5·P9] 저장 기한을 넘기면 트랜잭션이 롤백되고 늦은 완료가 남지 않는다", async () => {
+    const s = await repo.createSession("u1", "front-test");
+    const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });
+    // 다른 트랜잭션이 턴 행을 2.5초 동안 잠근다 → completeTurn(saveMs 1000)은 잠금 대기 중 기한 초과
+    const holder = prisma!.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM chat_turns WHERE id = ${t.id} FOR UPDATE`;
+      await new Promise((r) => setTimeout(r, 2500));
+    }, { timeout: 5000 });
+    await new Promise((r) => setTimeout(r, 100));
+    await expect(repo.completeTurn(t.id, result("늦은 답"), { saveMs: 1000 })).rejects.toThrow();
+    await holder;
+    await new Promise((r) => setTimeout(r, 500));
+    expect(await repo.findTurnByClientMsgId(s.id, uuid(1))).toMatchObject({ status: "processing", assistantText: null, traceId: null });
+    expect(await prisma!.messageTrace.count({ where: { turnId: t.id } })).toBe(0);
+  });
+
   it("failTurn은 processing일 때만 실패로 바꾼다", async () => {
     const s = await repo.createSession("u1", "front-test");
     const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });
@@ -2791,8 +2807,10 @@ export class TurnRepository implements ContextReader {
    * 기한을 넘기면 Prisma가 트랜잭션을 롤백하고 예외를 던진다 — 호출자는 결과를 확인한 뒤에만 이벤트를 보낸다.
    */
   private txOptions(saveMs = 3000): { maxWait: number; timeout: number } {
-    const maxWait = Math.min(1000, Math.floor(saveMs / 3));
-    return { maxWait, timeout: Math.max(500, saveMs - maxWait) };
+    // saveMs는 팩 검증에서 1000 이상이 보장된다. 합계(maxWait+timeout)가 saveMs를 넘지 않게 나눈다.
+    const budget = Math.max(1000, saveMs);
+    const maxWait = Math.min(1000, Math.floor(budget / 3));
+    return { maxWait, timeout: budget - maxWait };
   }
 
   async completeTurn(turnId: string, result: EngineResult, opts: { saveMs?: number } = {}): Promise<{ traceId: string } | null> {
@@ -3055,7 +3073,7 @@ describe.runIf(url)("앱 부팅 (통합)", () => {
 - [ ] **Step 6: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` 그리고 `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test`
-Expected: 스냅샷 9건 PASS, 턴 저장소 통합 10건 PASS, 앱 부팅 1건 PASS(URL 없으면 통합은 skip), core 회귀 없음
+Expected: 스냅샷 9건 PASS, 턴 저장소 통합 11건 PASS, 앱 부팅 1건 PASS(URL 없으면 통합은 skip), core 회귀 없음
 
 - [ ] **Step 7: 부팅 스모크 테스트 (사람이 준비한 `.env`와 DB 필요)**
 
