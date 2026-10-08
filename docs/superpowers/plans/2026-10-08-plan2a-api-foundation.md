@@ -158,10 +158,38 @@ const FORBIDDEN: { pattern: RegExp; reason: string }[] = [
 자체 테스트: 아래 문자열 각각이 하나 이상의 패턴에 걸려야 하고, 정상 import(`from "zod"`, `from "../domain/types"`)는 걸리지 않아야 한다.
 `import x from "@nestjs/common"`, `export { y } from "@prisma/client"`, `const m = await import("socket.io")`, `require("@typesafe-ai/sdk")`, `import "prisma/config"`, `process["env"].X`, `process.env.X`.
 
-- [ ] **0-7: 확인과 커밋**
+- [ ] **0-7: 이미 취소된 신호의 미처리 rejection 제거 (Codex 계획 1 최종 리뷰 L1, Major)**
+
+실패 테스트:
+- `abort.spec.ts`(신규): 이미 abort된 signal로 `raceWithAbort(Promise.reject(new Error("x")), signal, () => "cancelled")` → `"cancelled"`를 반환하고, `process.on("unhandledRejection")` 리스너가 테스트 동안 한 번도 호출되지 않는다(테스트 끝에 `await new Promise((r) => setTimeout(r, 10))` 후 확인, 리스너는 afterEach에서 제거).
+- `chat-engine.spec.ts`: 이미 abort된 signal로 `handle()` 호출, Judge의 judgeTurn/judgeRelevance가 reject하는 FakeJudge → 결과 route `error`, unhandledRejection 0건, **Judge가 한 번도 호출되지 않는다**(취소가 확정된 뒤에는 외부 작업을 시작하지 않음).
+구현:
+```ts
+export function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbort: () => T): Promise<T> {
+  if (signal.aborted) {
+    promise.catch(() => undefined); // 버려지는 원 Promise의 rejection을 관찰한다
+    return Promise.resolve(onAbort());
+  }
+  // (기존 경로 그대로)
+}
+```
+`chat-engine.ts`: 문맥 로딩 직후와 Judge 호출 직전에 `if (signal.aborted)`이면 Judge를 호출하지 않고 A 미완료(null)·B 미시작 상태로 결정 단계로 넘어간다(0-5의 원인 구분 audit 사용).
+
+- [ ] **0-8: clarify에도 헬프데스크 후처리 (L2)**
+
+설계 결정: `clarify`는 `showHelpdesk`면 헬프데스크 안내를 붙인다(모호하거나 범위가 애매해도 오류·계정 문제일 확률이 높으면 연락처가 필요). `blocked`·`error`는 붙이지 않는다(설계 1장 부가 규칙에 명시 — 오케스트레이터가 반영).
+실패 테스트(`extractive.spec.ts`): `clarify(ambiguous)` + showHelpdesk → 마지막 줄이 헬프데스크, `clarify(scope)` + showHelpdesk도 동일, showHelpdesk=false면 문구만. `chat-engine.spec.ts`: `error 0.4 + account_access 0.3 + regulation 0.3`, ambiguity 0.8 → route clarify, 텍스트 끝이 헬프데스크.
+구현: `ExtractiveAnswerer`의 clarify 분기를 즉시 반환하지 않고 `body = [문구]`로 두어 공통 후처리(`if (helpdeskRequired || input.showHelpdesk)`)를 거치게 한다.
+
+- [ ] **0-9: 크기·취소 경계 테스트 보강 (L3)**
+
+- `templates.spec.ts`: 질문이 여러 개인 64k 독립 fixture — state+최장 질문은 32k 이하로 유지하면서 전체 합만 64,000 / 64,001이 되도록 만들어 통과/초과를 각각 확인.
+- `chat-engine.spec.ts`: (a) B 하나만 기한 초과(나머지는 완료) → 완료된 B의 `usage`가 jevCalls에 보존되고 bStatus `partial`, (b) A 완료 직후 abort → 결정은 A 기준으로 정상 진행. 합성 audit(`attempts: 0`)은 "미완료·미측정" 의미임을 `ports.ts` 주석에 명시.
+
+- [ ] **0-10: 확인과 커밋**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` → 전부 PASS
-하위 항목별 커밋(예: `fix(core): in_scope 부동소수점 허용오차(계획1 최종리뷰)`), 0-1은 `feat(core): JevCallAudit에 실패 원인(cause) 추가 (계획 2A P3 선행)`.
+하위 항목별 커밋(예: `fix(core): in_scope 부동소수점 허용오차(계획1 최종리뷰)`, `fix(core): 이미 취소된 신호의 미처리 rejection 제거(Codex L1)`), 0-1은 `feat(core): JevCallAudit에 실패 원인(cause) 추가 (계획 2A P3 선행)`.
 
 설계 문서 반영(오케스트레이터 담당): blocked 변형 판정은 코드 동작(`P(smalltalk) ≥ P(out_of_scope)`이면 인사 응답)을 기준으로 설계 문구를 맞춘다.
 
@@ -595,9 +623,11 @@ describe("JevLimiter", () => {
     let t = 0;
     const limiter = new JevLimiter({ ...cfg, maxConcurrent: 10, maxTokensPerSecond: 100, maxWaitMs: 50 }, () => t);
     (await limiter.acquire(90, live()))();
-    t = 1000; // 창 만료
-    (await limiter.acquire(90, live()))();
-    await expect(limiter.acquire(20, live())).rejects.toMatchObject({ reason: "timeout" });
+    t = 1000; // 첫 창 만료
+    (await limiter.acquire(90, live()))(); // t=1000 창: 90 사용
+    const p = limiter.acquire(20, live()); // 110 > 100 → 대기
+    t = 1051; // 대기 기한(50ms)만 지나고 t=1000 창은 아직 유효 → timeout 거절
+    await expect(p).rejects.toMatchObject({ reason: "timeout" });
   });
 
   it("초당 토큰 수를 지킨다", async () => {
