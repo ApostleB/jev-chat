@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { abortableSleep, TypesafeJudge } from "./typesafe-judge";
-import { JevLimiter } from "./limiter";
+import { JevLimiter, LimiterRejectedError } from "./limiter";
 import { JevTransportError, type JevTransport, type JevTransportResult } from "./transport";
 import { DEFAULT_INTENTS, JevResponseError, type JevRequest, type Chunk } from "../../core";
 
@@ -116,6 +116,20 @@ describe("TypesafeJudge.judgeTurn", () => {
     const r = await j.judgeTurn({ message: "q", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, signal());
     expect(r).toMatchObject({ ok: false, errorKind: "provider" });
     expect(r.audit.cause).toEqual({ source: "limiter", kind: "oversized" });
+  });
+
+  it("[6-6] 재시도 시 제한기가 거절해도 1차 전송 원인을 보존하고 note를 남긴다", async () => {
+    const real = limiter();
+    let n = 0;
+    const flaky = {
+      acquire: (tokens: number, sig: AbortSignal) => (++n === 1 ? real.acquire(tokens, sig) : Promise.reject(new LimiterRejectedError("timeout"))),
+    } as unknown as JevLimiter;
+    const t = new ScriptedTransport([new JevTransportError("server", "503", { status: 503 })]);
+    const j = new TypesafeJudge({ transport: t, limiter: flaky, attemptTimeoutMs: 1000, sleep: noSleep });
+    const r = await j.judgeTurn({ message: "q", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, signal());
+    expect(r).toMatchObject({ ok: false, errorKind: "provider" });
+    expect(r.audit.attempts).toBe(1);
+    expect(r.audit.cause).toEqual({ source: "transport", kind: "server", status: 503, note: "limiterAfterRetry" });
   });
 
   it("[P3] 트랜스포트가 알 수 없는 예외를 던지면 재시도 없이 그대로 전파", async () => {

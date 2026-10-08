@@ -6,6 +6,7 @@ import {
   parseRelevanceAnswer,
   parseTurnAnswers,
   type JevCallAudit,
+  type JevCallCause,
   type JevRequest,
   type Judge,
   type JudgeErrorKind,
@@ -87,6 +88,7 @@ export class TypesafeJudge implements Judge {
     const started = this.now();
     const tokens = estimateTokens(payload.state) + estimateTokens(payload.questions);
     let attempts = 0;
+    let lastTransportCause: JevCallCause | undefined; // 재시도 때 제한기가 거절해도 1차 전송 원인을 잃지 않는다
     const fail = (errorKind: JudgeErrorKind, message: string, extra: Partial<JevCallAudit> = {}): JudgeOutcome<T> => ({
       ok: false,
       errorKind,
@@ -109,6 +111,11 @@ export class TypesafeJudge implements Judge {
       try {
         release = await this.deps.limiter.acquire(tokens, signal);
       } catch (e) {
+        if (lastTransportCause) {
+          const kept = { ...lastTransportCause, note: "limiterAfterRetry" };
+          if (signal.aborted) return fail("aborted", "취소됨", { cause: kept });
+          if (e instanceof LimiterRejectedError) return fail("provider", e.message, { cause: kept });
+        }
         if (signal.aborted) return fail("aborted", "취소됨", { cause: { source: "limiter", kind: "aborted" } });
         if (e instanceof LimiterRejectedError) return fail("provider", e.message, { cause: { source: "limiter", kind: e.reason } });
         throw e;
@@ -144,7 +151,8 @@ export class TypesafeJudge implements Judge {
         release();
         if (e instanceof JevResponseError) return fail("invalid_response", e.message, { cause: { source: "response" } });
         if (!(e instanceof JevTransportError)) throw e; // [P3] 알 수 없는 예외는 재시도하지 않고 위로 전달(내부 오류)
-        const cause = { source: "transport" as const, kind: e.kind, ...(e.status !== undefined ? { status: e.status } : {}) };
+        const cause: JevCallCause = { source: "transport", kind: e.kind, ...(e.status !== undefined ? { status: e.status } : {}) };
+        lastTransportCause = cause;
         if (e.kind === "aborted") return fail("aborted", e.message, { cause });
         const wait = e.retryAfterMs ?? DEFAULT_BACKOFF_MS;
         const retryable = RETRYABLE.has(e.kind) && attempts < this.maxAttempts && wait <= this.maxRetryWaitMs;

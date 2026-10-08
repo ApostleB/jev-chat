@@ -36,6 +36,8 @@ export interface JevCallCause {
   /** transport: rate_limited|overloaded|server|timeout|connection|client|aborted, limiter: timeout|oversized|aborted */
   kind?: string;
   status?: number;
+  /** 보조 표시. 예: "limiterAfterRetry" — 재시도 시 제한기에 거절돼 1차 전송 원인을 대신 남긴 경우 */
+  note?: string;
 }
 
 /**
