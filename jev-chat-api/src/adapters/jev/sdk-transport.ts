@@ -92,7 +92,7 @@ export class SdkJevTransport implements JevTransport {
     try {
       const res = await this.client.systemOne(
         { model: payload.model, state: payload.state as never, questions: payload.questions as never },
-        { signal: attemptSignal, retry: { maxRetries: 0 } },
+        { signal: attemptSignal, timeout: opts.timeoutMs, retry: { maxRetries: 0 } },
       );
       const checked = checkShape(res);
       return {

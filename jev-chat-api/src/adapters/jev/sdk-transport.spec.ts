@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { JevTransportError } from "./transport";
 import { retryAfterFrom, SdkJevTransport, toTransportError } from "./sdk-transport";
 import { JevResponseError, type JevRequest } from "../../core";
@@ -135,5 +135,13 @@ describe("SdkJevTransport", () => {
     }
     const zero = fakeFetch(200, { ...base, usage: { input_tokens: 0, output_tokens: 0 } });
     await expect(transport(zero.fn).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 })).resolves.toMatchObject({ usage: { inputTokens: 0, outputTokens: 0 } });
+  });
+
+  it("[6-5] SDK 호출에 시도 타임아웃(timeout)을 넘겨 SDK 기본값이 덮지 않게 한다", async () => {
+    const f = fakeFetch(200, { model: "jev-1.13.0", answers: {}, usage: { input_tokens: 1, output_tokens: 1 } });
+    const t = transport(f.fn);
+    const spy = vi.spyOn((t as unknown as { client: { systemOne: (...a: unknown[]) => unknown } }).client, "systemOne");
+    await t.send(payload, { signal: new AbortController().signal, timeoutMs: 4321 });
+    expect(spy.mock.calls[0]?.[1]).toMatchObject({ timeout: 4321, retry: { maxRetries: 0 } });
   });
 });

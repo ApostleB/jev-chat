@@ -3208,7 +3208,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [x] **6-2 (T2) 응답 형태 검증 강화**: `usage.input_tokens`/`output_tokens`는 0 이상의 **정수**, `model`은 빈 문자열 금지. 위반 시 `invalid_response`.
 - [ ] **6-3 (T3) abortableSleep 정리**: 정상 만료 시 abort 리스너 제거(`{ once: true }` + `removeEventListener`).
 - [ ] **6-4 (T4) B 합성 audit 원인 구분**: 엔진 기한 초과로 끝난 B는 `errorKind: "timeout"`, FAQ 조기 확정 등으로 취소된 B는 `"aborted"` — A와 같은 방식(`signal.reason`의 `TimeoutError` 여부)으로 기록.
-- [ ] **6-5 SDK 시도 타임아웃 전달**: `systemOne` 호출 옵션에 `timeout: opts.timeoutMs`도 넘겨 SDK 기본 10초가 설정값을 덮지 않게 한다.
+- [x] **6-5 SDK 시도 타임아웃 전달**: `systemOne` 호출 옵션에 `timeout: opts.timeoutMs`도 넘겨 SDK 기본 10초가 설정값을 덮지 않게 한다.
 - [ ] **6-6 재시도 원인 보존**: 2차 시도가 제한기에 거절되면 audit `cause`에 1차 전송 원인을 유지하고 `limiterAfterRetry: true` 같은 보조 표시를 남긴다(`JevCallCause`에 선택 필드 `note?: string` 추가로 충분).
 - [ ] **6-7 부팅 실패 처리**: `main.ts`를 `bootstrap().catch((e) => { console.error(e instanceof Error ? e.message : "부팅 실패"); process.exit(1); })`로 바꿔 env 검증 실패가 unhandled rejection이 아니라 명확한 종료가 되게 한다(메시지에 값이 들어가지 않음은 validateEnv가 보장).
 - [ ] **6-8 테스트 보강**: env "비밀 값 미포함" 테스트에 `expect.assertions(1)`, health 라우팅은 Task 5의 `app.e2e.spec.ts`로 충족됨을 확인, 멈춘 ContextReader 테스트에 Judge 호출 0회·jevCalls 확인 추가, helpdesk 경계 테스트를 round9가 실제로 필요한 조합(`0.1+0.2+0.2`)으로 교체.
