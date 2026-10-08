@@ -14,7 +14,11 @@ export type SourceRef = z.infer<typeof SourceRefSchema>;
 
 export const TurnStatusSchema = z.enum(["processing", "completed", "failed"]);
 
-export const TurnSchema = z.object({
+export const TurnErrorSchema = z.object({ code: ErrorCodeSchema, retryable: z.boolean() });
+export type TurnError = z.infer<typeof TurnErrorSchema>;
+
+export const TurnSchema = z
+  .object({
   turnId: z.string(),
   turnSeq: TurnSeqSchema,
   clientMsgId: UuidSchema,
@@ -23,9 +27,29 @@ export const TurnSchema = z.object({
   assistantText: z.string().optional(),
   route: RouteSchema.optional(),
   sources: z.array(SourceRefSchema).optional(),
-  error: z.object({ code: ErrorCodeSchema, retryable: z.boolean() }).optional(),
+  error: TurnErrorSchema.optional(),
   traceId: z.string().optional(),
-});
+  })
+  .superRefine((t, ctx) => {
+    const need = (field: "assistantText" | "route" | "error") => {
+      if (t[field] === undefined) ctx.addIssue({ code: "custom", path: [field], message: `${t.status} 턴에는 ${field}가 필요합니다.` });
+    };
+    const forbid = (field: "assistantText" | "route" | "error") => {
+      if (t[field] !== undefined) ctx.addIssue({ code: "custom", path: [field], message: `${t.status} 턴에는 ${field}를 둘 수 없습니다.` });
+    };
+    if (t.status === "completed") {
+      need("assistantText");
+      need("route");
+      if (t.route === "error") need("error");
+    } else if (t.status === "failed") {
+      need("error");
+      forbid("assistantText");
+    } else {
+      forbid("assistantText");
+      forbid("route");
+      forbid("error");
+    }
+  });
 export type Turn = z.infer<typeof TurnSchema>;
 
 // ── C→S
@@ -35,12 +59,18 @@ export const SessionStartRequestSchema = z.object({
 });
 export type SessionStartRequest = z.infer<typeof SessionStartRequestSchema>;
 
-export const SessionStartResponseSchema = z.object({
-  sessionId: UuidSchema,
-  turns: z.array(TurnSchema),
-  hasMore: z.boolean(),
-  nextBeforeTurnSeq: TurnSeqSchema.optional(),
-});
+export const SessionStartResponseSchema = z
+  .object({
+    sessionId: UuidSchema,
+    turns: z.array(TurnSchema),
+    hasMore: z.boolean(),
+    nextBeforeTurnSeq: TurnSeqSchema.optional(),
+  })
+  .superRefine((r, ctx) => {
+    if (r.hasMore && r.nextBeforeTurnSeq === undefined) {
+      ctx.addIssue({ code: "custom", path: ["nextBeforeTurnSeq"], message: "hasMore=true면 nextBeforeTurnSeq가 필요합니다." });
+    }
+  });
 export type SessionStartResponse = z.infer<typeof SessionStartResponseSchema>;
 
 export const ChatSendRequestSchema = z.object({
@@ -72,6 +102,14 @@ export const ChatDoneEventSchema = TurnRefSchema.extend({
   route: RouteSchema,
   sources: z.array(SourceRefSchema),
   traceId: z.string(),
+  error: TurnErrorSchema.optional(),
+}).superRefine((e, ctx) => {
+  if (e.route === "error" && e.error === undefined) {
+    ctx.addIssue({ code: "custom", path: ["error"], message: "route=error면 error가 필요합니다." });
+  }
+  if (e.route !== "error" && e.error !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["error"], message: "route가 error가 아니면 error를 둘 수 없습니다." });
+  }
 });
 export type ChatDoneEvent = z.infer<typeof ChatDoneEventSchema>;
 

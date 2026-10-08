@@ -7,6 +7,7 @@ import {
   MessageTextSchema,
   RouteSchema,
   SessionStartResponseSchema,
+  TurnSchema,
   isWithinPayloadLimit,
   MAX_PAYLOAD_BYTES,
   PROTOCOL_VERSION,
@@ -79,6 +80,56 @@ describe("ChatDoneEventSchema / SessionStartResponseSchema", () => {
       turns: [{ turnId: "t1", turnSeq: 1, clientMsgId: uuid, userText: "q", status: "failed", error: { code: "RESTARTED", retryable: true } }],
     });
     expect(r.turns[0]?.status).toBe("failed");
+  });
+
+  const doneBase = {
+    sessionId: uuid, clientMsgId: uuid, turnSeq: 2, turnId: "t2", text: "답",
+    route: "extractive", traceId: "tr1", sources: [],
+  };
+  it("오류 done은 error를 포함하면 통과한다", () => {
+    const e = ChatDoneEventSchema.parse({ ...doneBase, route: "error", error: { code: "JEV_UNAVAILABLE", retryable: true } });
+    expect(e.error?.retryable).toBe(true);
+  });
+  it("오류 done에 error가 없으면 거부한다", () => {
+    expect(ChatDoneEventSchema.safeParse({ ...doneBase, route: "error" }).success).toBe(false);
+  });
+  it("정상 done에 error가 있으면 거부한다", () => {
+    expect(ChatDoneEventSchema.safeParse({ ...doneBase, error: { code: "INTERNAL", retryable: false } }).success).toBe(false);
+  });
+});
+
+describe("TurnSchema 상태별 필수 필드", () => {
+  const base = { turnId: "t1", turnSeq: 1, clientMsgId: uuid, userText: "q" };
+  it("completed는 assistantText와 route가 필요하다", () => {
+    expect(TurnSchema.safeParse({ ...base, status: "completed", assistantText: "a", route: "faq" }).success).toBe(true);
+    expect(TurnSchema.safeParse({ ...base, status: "completed", route: "faq" }).success).toBe(false);
+    expect(TurnSchema.safeParse({ ...base, status: "completed", assistantText: "a" }).success).toBe(false);
+  });
+  it("completed + route=error면 error가 필요하다", () => {
+    expect(TurnSchema.safeParse({ ...base, status: "completed", assistantText: "a", route: "error" }).success).toBe(false);
+    expect(
+      TurnSchema.safeParse({ ...base, status: "completed", assistantText: "a", route: "error", error: { code: "INTERNAL", retryable: false } }).success,
+    ).toBe(true);
+  });
+  it("failed 턴은 error가 필요하고 assistantText는 금지", () => {
+    expect(TurnSchema.safeParse({ ...base, status: "failed" }).success).toBe(false);
+    expect(TurnSchema.safeParse({ ...base, status: "failed", error: { code: "RESTARTED", retryable: true } }).success).toBe(true);
+    expect(
+      TurnSchema.safeParse({ ...base, status: "failed", assistantText: "a", error: { code: "RESTARTED", retryable: true } }).success,
+    ).toBe(false);
+  });
+  it("processing 턴에 assistantText·route·error가 있으면 거부한다", () => {
+    expect(TurnSchema.safeParse({ ...base, status: "processing" }).success).toBe(true);
+    expect(TurnSchema.safeParse({ ...base, status: "processing", assistantText: "a" }).success).toBe(false);
+    expect(TurnSchema.safeParse({ ...base, status: "processing", route: "faq" }).success).toBe(false);
+    expect(TurnSchema.safeParse({ ...base, status: "processing", error: { code: "INTERNAL", retryable: false } }).success).toBe(false);
+  });
+});
+
+describe("SessionStartResponseSchema 페이지 커서", () => {
+  it("hasMore=true인데 nextBeforeTurnSeq가 없으면 거부한다", () => {
+    expect(SessionStartResponseSchema.safeParse({ sessionId: uuid, turns: [], hasMore: true }).success).toBe(false);
+    expect(SessionStartResponseSchema.safeParse({ sessionId: uuid, turns: [], hasMore: true, nextBeforeTurnSeq: 5 }).success).toBe(true);
   });
 });
 
