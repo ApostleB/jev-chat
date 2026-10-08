@@ -157,8 +157,9 @@ chat:send → 인증·권한·zod 검증
 
 ### 전역 Jev 제한기 [R1]
 - 같은 API 키를 쓰는 **모든 Jev 호출**이 하나의 제한기를 통과: 동시 실행 ≤ 40, 초당 요청 ≤ 70, 초당 토큰 ≤ 80k(추정치 기준). 모두 설정값.
-- 제한기 대기 최대 3s. 엔진 기한 8s를 넘길 수 없다.
-- 재시도는 **제한기 계층 한 곳에서만**: 429/529/5xx/timeout에 1회, `retry-after` 존중, 재시도도 예산에 포함. SDK 자체 재시도는 끈다.
+- 제한기 대기 최대 3s(**서버 설정 `JEV_LIMITER_WAIT_MS`** — 같은 키를 쓰는 전역 자원이라 팩 policy가 아닌 서버가 정함, trace의 policy에는 실제 값 기록). 엔진 기한 8s를 넘길 수 없다. 요청 하나가 초당 토큰 예산보다 크면 즉시 거절.
+- 재시도는 **제한기 계층 한 곳에서만**: 429/529/5xx/timeout/연결 오류에 1회, `retry-after`(ms·초·HTTP-date) 존중 — 대기가 `JEV_MAX_RETRY_WAIT_MS`(2s)를 넘으면 재시도하지 않음, 재시도도 예산에 포함. SDK 자체 재시도는 끈다. 알 수 없는 예외는 재시도하지 않는다(내부 오류).
+- 실패 원인(`cause`: transport/limiter/response/size + kind + HTTP status)을 jev_calls에 남겨, 평가에서 외부 장애와 내부·설정 오류를 구분한다(G1).
 - 요청 전 크기 검사: state+전체 질문 ≤ 64k, state+최장 질문 ≤ 32k(보수적 추정: ASCII 3자=1, 한글 1자=1.5, 기타 1자=2토큰). **recent_turns는 절대 축소하지 않는다**(A·B 문맥 일치). 초과 시 A는 FAQ 후보만 줄이고, 그래도 넘거나 B가 넘으면 해당 호출은 `too_large` 실패. 청크·FAQ 길이 상한은 import에서 강제(청크 4000자, FAQ 답 2000자).
 - 목표: p95 응답 ≤ 4s(동시 사용자 10명 기준), 별도 측정. 추정 토큰 대비 실제 usage 오차를 기록.
 
@@ -232,7 +233,7 @@ knowledge_chunks    (version_id, id) PK · module · kind(regulation|how_to) · 
 faqs                (version_id, id) PK · intent · summary · applies_when · answer · source_chunk_id → (version_id, source_chunk_id)
 faq_variants        id · (version_id, faq_id) FK · text
 ```
-- `pnpm knowledge:import`(CLI): domain-pack 검증(zod, 중복 ID, 참조 무결성, template_version 호환) → 새 버전 적재 → 성공 시 active 전환. 실패 시 `failed`로 남기고 이전 active 유지.
+- `pnpm knowledge:import`(CLI): domain-pack 검증(zod, 중복 ID, 참조 무결성, template_version 호환, DB 컬럼 길이, FAQ id `none` 예약) → **원자 import**: `knowledge_state`(id=1, `active_version_id`) 행을 `FOR UPDATE`로 잠가 동시 import를 직렬화하고, 잠금 안에서 같은 contentHash면 건너뜀. 실패 시 전체 롤백(실패 버전 행을 남기지 않음), 이전 active 유지.
 - `POST /api/admin/knowledge/reload`: **DB의 active 버전으로 실행 스냅샷(인덱스 포함)을 새로 만든 뒤 참조를 원자적으로 교체.** 파일을 읽지 않는다. 빌드 실패 시 이전 스냅샷 유지. 동시에 하나만 실행(single-flight).
 - **MVP는 지식 버전을 삭제하지 않는다** [F8]. trace가 참조하는 FAQ/청크 원문을 항상 복원할 수 있다. 버전 정리는 MVP 이후(참조 중인 버전 보존 조건 포함).
 
@@ -419,7 +420,7 @@ GET  /api/health
 ```
 domain-pack/hanbit-erp/
 ├─ manifest.yaml   name, version, language, helpdesk{phone,email,url}, template_version(호환성 검사용)
-├─ policy.yaml     임계값(in_scope 0.4/0.6, ambiguous 0.7, faq 0.8, relevance 0.5/0.8, helpdesk 0.5), 후보 수(5/8), 기한(엔진 8s·큐 10s·제한기 3s·저장 3s)
+├─ policy.yaml     임계값(in_scope 0.4/0.6, ambiguous 0.7, faq 0.8, relevance 0.5/0.8, helpdesk 0.5), 후보 수(5/8, 상한 10/12), 문맥(max_turns ≤ 3, assistant_max_chars ≤ 500), 기한(엔진 8s·큐 10s·저장 3s)
 ├─ intents.yaml    의도 6개 criteria
 ├─ chunks.jsonl    {id, module, kind, title, section, text, tags, updated_at}
 ├─ faqs.jsonl      {id, intent, summary, applies_when, answer, source_chunk_id, variants[]}

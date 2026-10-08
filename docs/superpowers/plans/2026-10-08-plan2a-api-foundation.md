@@ -14,7 +14,8 @@
 ## Global Constraints
 
 - 계획 1의 Global Constraints를 모두 따른다(한국어, 커밋 trailer, core 경계, `.env*` 읽기 금지, push 금지).
-- **core(`src/core/**`)는 수정하지 않는다.** core 공개 API(`src/core/index.ts`)만 import한다. core에 버그가 있으면 멈추고 보고한다.
+- **core(`src/core/**`)는 Task 0의 선행 수정 외에는 수정하지 않는다.** core 공개 API(`src/core/index.ts`)만 import한다. core에 버그가 있으면 멈추고 보고한다.
+- 이 계획은 Codex 사전 검토(`docs/reviews/2026-10-08-plan2a-plan-review-codex.md`, P1~P10)를 반영한 개정판이다. 각 반영 위치에 `[P#]`를 표시했다.
 - 버전 고정: `prisma` / `@prisma/client` / `@prisma/adapter-mariadb` = **정확히 7.10.0**(`latest`는 Prisma 8이라 사용 금지). Nest 코어 패키지 = 12.1.2. `@typesafe-ai/sdk` = 0.6.0. Prisma 문서는 `/docs/orm/v7/` 경로만 참고.
 - 모듈 형식: `jev-chat-api`는 CommonJS 유지(`package.json`에 `"type"` 없음, tsconfig `module: nodenext`). Prisma generator는 `moduleFormat = "cjs"`, 출력은 `src/generated/prisma`(git 제외).
 - 시크릿: API 키·DB 비밀번호는 env로만. `TypeSafeClient`에는 `apiKey`를 설정값으로 **명시적으로** 넘긴다(SDK의 env 자동 읽기에 의존하지 않음). SDK 로그 레벨은 `warn` 이상(`debug`는 body를 마스킹하지 않음).
@@ -59,6 +60,40 @@ jev-chat/
       │  ├─ app.module.ts
       │  └─ main.ts
       └─ scripts/knowledge-import.ts   CLI: domain-pack → 새 지식 버전
+```
+
+---
+
+### Task 0: core 선행 수정 — Jev 호출 실패 원인(cause) 기록 [P3]
+
+**Files:**
+- Modify: `jev-chat-api/src/core/judge/ports.ts`
+
+**Interfaces:**
+- Produces: `interface JevCallCause { source: "transport" | "limiter" | "response" | "size"; kind?: string; status?: number }`, `JevCallAudit.cause?: JevCallCause`
+
+- [ ] **Step 1: 타입 추가**
+
+`ports.ts`의 `JevCallAudit` 위에 추가하고 필드를 하나 더한다:
+```ts
+/** 실패 원인 증거. 평가에서 외부 장애(429/529/5xx/연결)와 내부·설정 오류를 구분하는 데 쓴다. 원문 메시지·헤더·키는 담지 않는다. */
+export interface JevCallCause {
+  source: "transport" | "limiter" | "response" | "size";
+  /** transport: rate_limited|overloaded|server|timeout|connection|client|aborted, limiter: timeout|oversized|aborted */
+  kind?: string;
+  status?: number;
+}
+```
+`JevCallAudit`에 `cause?: JevCallCause;` 추가. `core/index.ts`의 judge/ports 재수출 목록에 `JevCallCause` 추가.
+
+- [ ] **Step 2: 확인과 커밋**
+
+Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` → 기존 테스트 전부 PASS
+```bash
+git add jev-chat-api/src/core/judge/ports.ts jev-chat-api/src/core/index.ts
+git commit -m "feat(core): JevCallAudit에 실패 원인(cause) 필드 추가 (계획 2A P3 선행)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -197,6 +232,8 @@ describe("validateEnv", () => {
     expect(env.JEV_MAX_RPS).toBe(70);
     expect(env.JEV_MAX_TPS).toBe(80000);
     expect(env.JEV_ATTEMPT_TIMEOUT_MS).toBe(5000);
+    expect(env.JEV_LIMITER_WAIT_MS).toBe(3000);
+    expect(env.JEV_MAX_RETRY_WAIT_MS).toBe(2000);
     expect(env.RETENTION_DAYS).toBe(90);
     expect(env.CORS_ORIGINS).toEqual(["http://localhost:5173"]);
     expect(env.DOMAIN_PACK_DIR).toBe("domain-pack/hanbit-erp");
@@ -270,6 +307,8 @@ export const EnvSchema = z
     JEV_MAX_CONCURRENT: int(40),
     JEV_MAX_RPS: int(70),
     JEV_MAX_TPS: int(80000),
+    JEV_LIMITER_WAIT_MS: int(3000),
+    JEV_MAX_RETRY_WAIT_MS: int(2000),
     DB_HOST: z.string().min(1),
     DB_PORT: int(3306),
     DB_USER: z.string().min(1),
@@ -373,6 +412,8 @@ JEV_ATTEMPT_TIMEOUT_MS=5000
 JEV_MAX_CONCURRENT=40
 JEV_MAX_RPS=70
 JEV_MAX_TPS=80000
+JEV_LIMITER_WAIT_MS=3000     # 제한기 대기 상한(서버 전역 설정, trace의 policy에도 이 값이 기록됨)
+JEV_MAX_RETRY_WAIT_MS=2000   # Retry-After가 이보다 길면 재시도하지 않음
 
 # MariaDB (앱 접속 정보, Docker 비의존)
 DB_HOST=127.0.0.1
@@ -459,7 +500,7 @@ describe("JevLimiter", () => {
   it("maxWaitMs를 넘기면 LimiterRejectedError", async () => {
     const limiter = new JevLimiter({ ...cfg, maxConcurrent: 1, maxWaitMs: 40 });
     const r1 = await limiter.acquire(10, live());
-    await expect(limiter.acquire(10, live())).rejects.toBeInstanceOf(LimiterRejectedError);
+    await expect(limiter.acquire(10, live())).rejects.toMatchObject({ reason: "timeout" });
     r1();
   });
 
@@ -468,6 +509,26 @@ describe("JevLimiter", () => {
     (await limiter.acquire(1, live()))();
     (await limiter.acquire(1, live()))();
     await expect(limiter.acquire(1, live())).rejects.toBeInstanceOf(LimiterRejectedError);
+  });
+
+  it("[P1] 첫 요청이라도 초당 토큰 예산보다 크면 즉시 oversized 거절", async () => {
+    const limiter = new JevLimiter({ ...cfg, maxTokensPerSecond: 100 });
+    await expect(limiter.acquire(101, live())).rejects.toMatchObject({ reason: "oversized" });
+    expect(limiter.stats()).toEqual({ active: 0, waiting: 0 });
+  });
+
+  it("[P1] 예산과 정확히 같은 요청은 통과", async () => {
+    const limiter = new JevLimiter({ ...cfg, maxTokensPerSecond: 100 });
+    (await limiter.acquire(100, live()))();
+  });
+
+  it("[P1] 창이 만료된 직후에도 토큰 예산을 적용한다(가짜 시계)", async () => {
+    let t = 0;
+    const limiter = new JevLimiter({ ...cfg, maxConcurrent: 10, maxTokensPerSecond: 100, maxWaitMs: 50 }, () => t);
+    (await limiter.acquire(90, live()))();
+    t = 1000; // 창 만료
+    (await limiter.acquire(90, live()))();
+    await expect(limiter.acquire(20, live())).rejects.toMatchObject({ reason: "timeout" });
   });
 
   it("초당 토큰 수를 지킨다", async () => {
@@ -510,7 +571,7 @@ describe("JevLimiter", () => {
 ```ts
 import { describe, expect, it } from "vitest";
 import { JevTransportError } from "./transport";
-import { SdkJevTransport } from "./sdk-transport";
+import { retryAfterFrom, SdkJevTransport, toTransportError } from "./sdk-transport";
 import type { JevRequest } from "../../core";
 
 const payload: JevRequest = {
@@ -556,6 +617,43 @@ describe("SdkJevTransport", () => {
     expect(await transport(fakeFetch(529, {}).fn).send(payload, { signal: s, timeoutMs: 1000 }).catch((e) => e.kind)).toBe("overloaded");
     expect(await transport(fakeFetch(500, {}).fn).send(payload, { signal: s, timeoutMs: 1000 }).catch((e) => e.kind)).toBe("server");
     expect(await transport(fakeFetch(400, {}).fn).send(payload, { signal: s, timeoutMs: 1000 }).catch((e) => e.kind)).toBe("client");
+  });
+
+  it("[P2] 503 + HTTP-date Retry-After → 남은 시간(ms)으로 해석", async () => {
+    const future = new Date(Date.now() + 1500).toUTCString();
+    const err = await transport(fakeFetch(503, {}, { "retry-after": future }).fn)
+      .send(payload, { signal: new AbortController().signal, timeoutMs: 1000 })
+      .catch((e) => e);
+    expect(err).toMatchObject({ kind: "server", status: 503 });
+    expect(err.retryAfterMs).toBeGreaterThan(0);
+    expect(err.retryAfterMs).toBeLessThanOrEqual(1500);
+  });
+
+  it("[P2] retryAfterFrom: ms·초·날짜·잘못된 값·음수", () => {
+    const h = (o: Record<string, string>) => new Headers(o);
+    expect(retryAfterFrom(h({ "retry-after-ms": "250" }))).toBe(250);
+    expect(retryAfterFrom(h({ "retry-after": "2" }))).toBe(2000);
+    expect(retryAfterFrom(h({ "retry-after": new Date(10_000).toUTCString() }), () => 4_000)).toBe(6000);
+    expect(retryAfterFrom(h({ "retry-after": "soon" }))).toBeUndefined();
+    expect(retryAfterFrom(h({ "retry-after": "-1" }))).toBeUndefined();
+    expect(retryAfterFrom(h({}))).toBeUndefined();
+  });
+
+  it("[P3] 401 → client(status 401), 재시도 대상 아님", async () => {
+    const err = await transport(fakeFetch(401, { error: "bad key" }).fn).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 }).catch((e) => e);
+    expect(err).toMatchObject({ kind: "client", status: 401 });
+  });
+
+  it("[P3] SDK가 아닌 예외는 매핑하지 않는다(toTransportError → null)", () => {
+    expect(toTransportError(new TypeError("bug"), new AbortController().signal)).toBeNull();
+  });
+
+  it("이미 abort된 signal로 호출 → aborted", async () => {
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const hanging = ((_url: string, init?: RequestInit) =>
+      init?.signal?.aborted ? Promise.reject(new DOMException("aborted", "AbortError")) : new Promise(() => {})) as unknown as typeof fetch;
+    expect(await transport(hanging).send(payload, { signal: ctrl.signal, timeoutMs: 5000 }).catch((e) => e.kind)).toBe("aborted");
   });
 
   it("호출자 abort → aborted", async () => {
@@ -681,6 +779,45 @@ describe("TypesafeJudge.judgeTurn", () => {
     expect(Object.keys((t.sent[0]?.questions.faq as { criteria: object }).criteria)).toEqual(["f1", "none"]);
   });
 
+  it("[P3] 실패 audit에 원인(transport kind·status)을 남긴다", async () => {
+    const t = new ScriptedTransport([new JevTransportError("client", "401", { status: 401 })]);
+    const r = await judge(t).judgeTurn({ message: "q", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, signal());
+    expect(r.audit.cause).toEqual({ source: "transport", kind: "client", status: 401 });
+    const t2 = new ScriptedTransport([new JevTransportError("server", "503", { status: 503 }), new JevTransportError("server", "503", { status: 503 })]);
+    const r2 = await judge(t2).judgeTurn({ message: "q", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, signal());
+    expect(r2.audit.cause).toEqual({ source: "transport", kind: "server", status: 503 });
+  });
+
+  it("[P3] 제한기 거절은 limiter 원인으로 남는다", async () => {
+    const tiny = new JevLimiter({ maxConcurrent: 10, maxRequestsPerSecond: 100, maxTokensPerSecond: 1, maxWaitMs: 100 });
+    const j = new TypesafeJudge({ transport: new ScriptedTransport([]), limiter: tiny, attemptTimeoutMs: 1000, sleep: noSleep });
+    const r = await j.judgeTurn({ message: "q", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, signal());
+    expect(r).toMatchObject({ ok: false, errorKind: "provider" });
+    expect(r.audit.cause).toEqual({ source: "limiter", kind: "oversized" });
+  });
+
+  it("[P3] 트랜스포트가 알 수 없는 예외를 던지면 재시도 없이 그대로 전파", async () => {
+    const t: JevTransport = { send: async () => { throw new TypeError("bug"); } };
+    await expect(judge(t).judgeTurn({ message: "q", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, signal())).rejects.toThrow(TypeError);
+  });
+
+  it("[P2] Retry-After가 maxRetryWaitMs보다 길면 재시도하지 않는다", async () => {
+    const t = new ScriptedTransport([Object.assign(new JevTransportError("overloaded", "529", { status: 529 }), { retryAfterMs: 5000 })]);
+    const j = new TypesafeJudge({ transport: t, limiter: limiter(), attemptTimeoutMs: 1000, maxRetryWaitMs: 2000, sleep: noSleep });
+    const r = await j.judgeTurn({ message: "q", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, signal());
+    expect(r).toMatchObject({ ok: false, errorKind: "provider" });
+    expect(t.sent).toHaveLength(1);
+  });
+
+  it("[P2] 재시도 대기 중 취소되면 aborted", async () => {
+    const ctrl = new AbortController();
+    const t = new ScriptedTransport([new JevTransportError("server", "503", { status: 503 }), ok(turnAnswers)]);
+    const j = new TypesafeJudge({ transport: t, limiter: limiter(), attemptTimeoutMs: 1000, sleep: async () => ctrl.abort() });
+    const r = await j.judgeTurn({ message: "q", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, ctrl.signal);
+    expect(r).toMatchObject({ ok: false, errorKind: "aborted" });
+    expect(t.sent).toHaveLength(1);
+  });
+
   it("재시도 대기 시간은 retryAfterMs를 따른다", async () => {
     const waits: number[] = [];
     const t = new ScriptedTransport([Object.assign(new JevTransportError("rate_limited", "429"), { retryAfterMs: 300 }), ok(turnAnswers)]);
@@ -758,15 +895,24 @@ export interface SdkLogger {
   error(message: string, ...args: unknown[]): void;
 }
 
-function retryAfterFrom(headers: Headers | undefined): number | undefined {
-  const raw = headers?.get("retry-after-ms") ?? headers?.get("retry-after");
-  if (!raw) return undefined;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return undefined;
-  return headers?.get("retry-after-ms") ? n : n * 1000;
+/** [P2] retry-after-ms(밀리초) → Retry-After(초 또는 HTTP-date) 순으로 해석. 해석 불가·음수는 undefined. */
+export function retryAfterFrom(headers: Headers | undefined, now: () => number = () => Date.now()): number | undefined {
+  const ms = headers?.get("retry-after-ms");
+  if (ms !== null && ms !== undefined) {
+    const n = Number(ms);
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
+  }
+  const raw = headers?.get("retry-after");
+  if (raw === null || raw === undefined || raw.trim() === "") return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return seconds >= 0 ? seconds * 1000 : undefined;
+  const at = Date.parse(raw);
+  if (Number.isNaN(at)) return undefined;
+  return Math.max(0, at - now());
 }
 
-export function toTransportError(err: unknown, callerSignal: AbortSignal): JevTransportError {
+/** 알려진 SDK 오류만 매핑한다. [P3] 그 외(프로그래밍 오류 등)는 null → 원래 예외를 그대로 던진다. */
+export function toTransportError(err: unknown, callerSignal: AbortSignal): JevTransportError | null {
   if (err instanceof APIUserAbortError) {
     // 시도 타임아웃은 우리 쪽 AbortSignal.timeout으로 구현되므로, 호출자 신호가 살아 있으면 timeout이다.
     return callerSignal.aborted ? new JevTransportError("aborted", "호출자가 취소함") : new JevTransportError("timeout", "시도 시간 초과");
@@ -780,8 +926,12 @@ export function toTransportError(err: unknown, callerSignal: AbortSignal): JevTr
     const kind = err.status === 529 ? "overloaded" : "server";
     return new JevTransportError(kind, `서버 오류 ${err.status}`, { status: err.status, retryAfterMs: retryAfterFrom(err.headers) });
   }
-  if (err instanceof APIError) return new JevTransportError("client", `요청 오류 ${err.status}`, { status: err.status });
-  return new JevTransportError("connection", "알 수 없는 전송 오류");
+  if (err instanceof APIError) {
+    // 408 등 기타 상태: 5xx가 아니면 client로 본다
+    const kind = err.status >= 500 ? "server" : "client";
+    return new JevTransportError(kind, `요청 오류 ${err.status}`, { status: err.status, retryAfterMs: retryAfterFrom(err.headers) });
+  }
+  return null;
 }
 
 export class SdkJevTransport implements JevTransport {
@@ -812,7 +962,7 @@ export class SdkJevTransport implements JevTransport {
         usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens },
       };
     } catch (err) {
-      throw toTransportError(err, opts.signal);
+      throw toTransportError(err, opts.signal) ?? err;
     }
   }
 }
@@ -830,8 +980,10 @@ export interface LimiterConfig {
   maxWaitMs: number;
 }
 
+export type LimiterRejectReason = "timeout" | "oversized" | "aborted";
+
 export class LimiterRejectedError extends Error {
-  constructor(message = "Jev 제한기 대기 시간 초과") {
+  constructor(readonly reason: LimiterRejectReason, message = "Jev 제한기 대기 시간 초과") {
     super(message);
     this.name = "LimiterRejectedError";
   }
@@ -862,11 +1014,15 @@ export class JevLimiter {
   }
 
   acquire(estimatedTokens: number, signal: AbortSignal): Promise<() => void> {
-    if (signal.aborted) return Promise.reject(new LimiterRejectedError("이미 취소된 요청"));
+    if (signal.aborted) return Promise.reject(new LimiterRejectedError("aborted", "이미 취소된 요청"));
+    // [P1] 요청 하나가 초당 토큰 예산보다 크면 기다려도 통과할 수 없으므로 즉시 거절한다.
+    if (estimatedTokens > this.config.maxTokensPerSecond) {
+      return Promise.reject(new LimiterRejectedError("oversized", "요청 추정 토큰이 초당 예산보다 큼"));
+    }
     return new Promise((resolve, reject) => {
       const onAbort = () => {
         this.remove(waiter);
-        reject(new LimiterRejectedError("대기 중 취소됨"));
+        reject(new LimiterRejectedError("aborted", "대기 중 취소됨"));
       };
       const waiter: Waiter = {
         tokens: estimatedTokens,
@@ -897,7 +1053,7 @@ export class JevLimiter {
     return (
       this.active < this.config.maxConcurrent &&
       this.window.length < this.config.maxRequestsPerSecond &&
-      (usedTokens + tokens <= this.config.maxTokensPerSecond || this.window.length === 0)
+      usedTokens + tokens <= this.config.maxTokensPerSecond
     );
   }
 
@@ -907,7 +1063,7 @@ export class JevLimiter {
     for (const w of [...this.queue]) {
       if (now - w.enqueuedAt > this.config.maxWaitMs) {
         this.remove(w);
-        w.reject(new LimiterRejectedError());
+        w.reject(new LimiterRejectedError("timeout"));
       }
     }
     // FIFO로 시작 가능한 만큼 시작
@@ -973,6 +1129,8 @@ interface Deps {
   transport: JevTransport;
   limiter: JevLimiter;
   attemptTimeoutMs: number;
+  /** [P2] Retry-After가 이보다 길면 재시도하지 않는다 */
+  maxRetryWaitMs?: number;
   maxAttempts?: number;
   now?: () => number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -988,11 +1146,13 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
 
 export class TypesafeJudge implements Judge {
   private readonly maxAttempts: number;
+  private readonly maxRetryWaitMs: number;
   private readonly now: () => number;
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
 
   constructor(private readonly deps: Deps) {
     this.maxAttempts = deps.maxAttempts ?? 2;
+    this.maxRetryWaitMs = deps.maxRetryWaitMs ?? 2000;
     this.now = deps.now ?? (() => performance.now());
     this.sleep = deps.sleep ?? abortableSleep;
   }
@@ -1011,7 +1171,7 @@ export class TypesafeJudge implements Judge {
   }
 
   private tooLarge<T>(call: "turn" | "relevance", chunkId?: string): JudgeOutcome<T> {
-    const audit: JevCallAudit = { call, status: "failed", attempts: 0, latencyMs: 0, errorKind: "too_large", ...(chunkId ? { chunkId } : {}) };
+    const audit: JevCallAudit = { call, status: "failed", attempts: 0, latencyMs: 0, errorKind: "too_large", cause: { source: "size" }, ...(chunkId ? { chunkId } : {}) };
     return { ok: false, errorKind: "too_large", message: "요청 크기 한도 초과", audit };
   }
 
@@ -1047,8 +1207,9 @@ export class TypesafeJudge implements Judge {
       try {
         release = await this.deps.limiter.acquire(tokens, signal);
       } catch (e) {
-        if (signal.aborted) return fail("aborted", "취소됨");
-        return fail("provider", e instanceof LimiterRejectedError ? e.message : "제한기 오류");
+        if (signal.aborted) return fail("aborted", "취소됨", { cause: { source: "limiter", kind: "aborted" } });
+        if (e instanceof LimiterRejectedError) return fail("provider", e.message, { cause: { source: "limiter", kind: e.reason } });
+        throw e;
       }
       attempts++;
       try {
@@ -1072,16 +1233,21 @@ export class TypesafeJudge implements Judge {
             },
           };
         } catch (e) {
-          if (e instanceof JevResponseError) return fail("invalid_response", e.message, { model: res.model, usage: res.usage, answer: res.answers });
+          if (e instanceof JevResponseError) {
+            return fail("invalid_response", e.message, { model: res.model, usage: res.usage, answer: res.answers, cause: { source: "response" } });
+          }
           throw e;
         }
       } catch (e) {
         release();
-        if (!(e instanceof JevTransportError)) throw e;
-        if (e.kind === "aborted") return fail("aborted", e.message);
-        const retryable = RETRYABLE.has(e.kind) && attempts < this.maxAttempts;
-        if (!retryable) return fail(e.kind === "timeout" ? "timeout" : "provider", e.message);
-        await this.sleep(e.retryAfterMs ?? DEFAULT_BACKOFF_MS, signal);
+        if (!(e instanceof JevTransportError)) throw e; // [P3] 알 수 없는 예외는 재시도하지 않고 위로 전달(내부 오류)
+        const cause = { source: "transport" as const, kind: e.kind, ...(e.status !== undefined ? { status: e.status } : {}) };
+        if (e.kind === "aborted") return fail("aborted", e.message, { cause });
+        const wait = e.retryAfterMs ?? DEFAULT_BACKOFF_MS;
+        const retryable = RETRYABLE.has(e.kind) && attempts < this.maxAttempts && wait <= this.maxRetryWaitMs;
+        if (!retryable) return fail(e.kind === "timeout" ? "timeout" : "provider", e.message, { cause });
+        await this.sleep(wait, signal);
+        if (signal.aborted) return fail("aborted", "재시도 대기 중 취소됨", { cause });
       }
     }
     return fail("provider", "재시도 소진");
@@ -1228,6 +1394,14 @@ model KnowledgeVersion {
   @@map("knowledge_versions")
 }
 
+/// [P7] 활성 지식 버전 포인터(단일 행 id=1). import는 이 행을 FOR UPDATE로 잠가 직렬화한다.
+model KnowledgeState {
+  id              Int     @id
+  activeVersionId String? @map("active_version_id") @db.Char(36)
+
+  @@map("knowledge_state")
+}
+
 model KnowledgeChunk {
   versionId   String           @map("version_id") @db.Char(36)
   id          String           @db.VarChar(100)
@@ -1240,6 +1414,7 @@ model KnowledgeChunk {
   updatedAt   String           @map("updated_at") @db.VarChar(10)
   contentHash String           @map("content_hash") @db.Char(64)
   version     KnowledgeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  faqs        Faq[]
 
   @@id([versionId, id])
   @@map("knowledge_chunks")
@@ -1254,9 +1429,8 @@ model Faq {
   answer        String           @db.Text
   sourceChunkId String?          @map("source_chunk_id") @db.VarChar(100)
   version       KnowledgeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  sourceChunk   KnowledgeChunk?  @relation(fields: [versionId, sourceChunkId], references: [versionId, id], onDelete: Restrict, onUpdate: Restrict)
   variants      FaqVariant[]
-  // source_chunk_id → (version_id, id) 참조 무결성은 loadDomainPack이 검증한다.
-  // (version_id는 필수, source_chunk_id는 선택이라 Prisma 복합 FK로 표현할 수 없음)
 
   @@id([versionId, id])
   @@map("faqs")
@@ -1353,10 +1527,12 @@ model MessageReview {
 ```
 ※ 설계 3장의 trace 상세 필드(intent_probs, context, retrieval, candidates, jev_calls, latency_ms, policy)는 core `TraceRecord` 전체를 `data` JSON 하나로 저장하고, 조회·필터에 쓰는 값만 컬럼으로 뺀다(설계 대비 저장 형식 단순화, 정보 손실 없음).
 
-- [ ] **Step 3: 클라이언트 생성 확인**
+- [ ] **Step 3: 스키마 검증과 클라이언트 생성 확인** [P6]
 
-Run: `pnpm --filter jev-chat-api db:generate`
-Expected: `jev-chat-api/src/generated/prisma/client.ts` 등 생성, 오류 없음
+Run: `pnpm --filter jev-chat-api prisma validate && pnpm --filter jev-chat-api db:generate`
+Expected: 오류 없음, `jev-chat-api/src/generated/prisma/client.ts` 등 생성.
+- 만약 `Faq.sourceChunk`(필수 `versionId` + 선택 `sourceChunkId`의 복합 관계)에서 Prisma 7.10이 "relation must be required" 류의 검증 오류를 내면: `sourceChunk` 관계와 `KnowledgeChunk.faqs` 역관계를 제거하고, 그 자리에 주석 `// 설계 예외: source_chunk_id 무결성은 loadDomainPack 검증 + KnowledgeRepository 적재 트랜잭션에서 보장`을 남긴 뒤 다시 validate한다. 어느 쪽을 택했는지 커밋 메시지와 체크포인트 보고에 적는다.
+- 마이그레이션 SQL(Step 6 이후)에서 `faqs`의 FK가 `ON DELETE RESTRICT`이고 `version_id`를 NULL로 만드는 동작(SET NULL)이 없는지 확인한다.
 
 - [ ] **Step 4: Prisma 클라이언트 팩토리와 테스트 헬퍼 작성**
 
@@ -1415,6 +1591,7 @@ export async function resetTestDb(prisma: PrismaClient): Promise<void> {
   await prisma.faq.deleteMany();
   await prisma.knowledgeChunk.deleteMany();
   await prisma.knowledgeVersion.deleteMany();
+  await prisma.knowledgeState.deleteMany();
 }
 ```
 
@@ -1511,7 +1688,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `loadDomainPack(dir: string): Promise<DomainPack>` (검증: zod 형식, 중복 ID, FAQ source_chunk 참조, intents = INTENT_IDS 정확히 6개, template_version = core TEMPLATE_VERSION)
   - `class MapKnowledgeReader implements KnowledgeReader` — `constructor(versionId: string, chunks: Chunk[], faqs: Faq[])`
   - `interface ActiveKnowledge { versionId: string; pack: Omit<DomainPack, "chunks" | "faqs" | "contentHash">; chunks: Chunk[]; faqs: Faq[] }`
-  - `class KnowledgeRepository` — `constructor(prisma: PrismaClient)`, `importPack(pack: DomainPack): Promise<{ versionId: string; skipped: boolean }>` (같은 contentHash가 이미 active면 skipped), `loadActive(): Promise<ActiveKnowledge | null>`
+  - `class KnowledgeRepository` — `constructor(prisma: PrismaClient)`, `importPack(pack: DomainPack): Promise<{ versionId: string; skipped: boolean }>` (knowledge_state 행 잠금으로 직렬화, 잠금 안에서 같은 contentHash면 skipped, 실패 시 전체 롤백), `loadActive(): Promise<ActiveKnowledge | null>` (knowledge_state 포인터 기준)
 
 - [ ] **Step 1: 테스트용 미니 팩 작성**
 
@@ -1535,7 +1712,7 @@ relevance: { reference: 0.5, answer: 0.8 }
 helpdesk: 0.5
 candidates: { faq: 5, chunk: 8 }
 context: { max_turns: 2, assistant_max_chars: 300 }
-deadlines: { engine_ms: 8000, queue_ms: 10000, limiter_ms: 3000, save_ms: 3000 }
+deadlines: { engine_ms: 8000, queue_ms: 10000, save_ms: 3000 }
 ```
 
 `.../mini-pack/intents.yaml`:
@@ -1634,6 +1811,38 @@ describe("loadDomainPack", () => {
     await expect(loadDomainPack(dir)).rejects.toThrow(/template_version/);
   });
 
+  it("[P8] FAQ id 'none'은 거부", async () => {
+    const dir = copyMini();
+    const p = join(dir, "faqs.jsonl");
+    writeFileSync(p, readFileSync(p, "utf8").replace('"faq-card-limit"', '"none"'));
+    await expect(loadDomainPack(dir)).rejects.toThrow(/none/);
+  });
+
+  it("[P8] 빈 source_chunk_id는 거부", async () => {
+    const dir = copyMini();
+    const p = join(dir, "faqs.jsonl");
+    writeFileSync(p, readFileSync(p, "utf8").replace('"source_chunk_id":"card-001"', '"source_chunk_id":""'));
+    await expect(loadDomainPack(dir)).rejects.toBeInstanceOf(PackValidationError);
+  });
+
+  it("[P8] 문맥 상한(max_turns ≤ 3)과 DB 길이(module ≤ 100) 검증", async () => {
+    const dir = copyMini();
+    const pp = join(dir, "policy.yaml");
+    writeFileSync(pp, readFileSync(pp, "utf8").replace("max_turns: 2", "max_turns: 9"));
+    await expect(loadDomainPack(dir)).rejects.toThrow(/max_turns/);
+    const dir2 = copyMini();
+    const cp = join(dir2, "chunks.jsonl");
+    writeFileSync(cp, readFileSync(cp, "utf8").replace('"module":"경비·법인카드"', `"module":"${"가".repeat(101)}"`));
+    await expect(loadDomainPack(dir2)).rejects.toThrow(/module/);
+  });
+
+  it("[P10] policy에 limiter_ms가 있으면 거부(서버 설정 항목)", async () => {
+    const dir = copyMini();
+    const pp = join(dir, "policy.yaml");
+    writeFileSync(pp, readFileSync(pp, "utf8").replace("save_ms: 3000", "save_ms: 3000, limiter_ms: 3000"));
+    await expect(loadDomainPack(dir)).rejects.toBeInstanceOf(PackValidationError);
+  });
+
   it("jsonl 형식 오류는 파일명과 줄 번호를 알려준다", async () => {
     const dir = copyMini();
     writeFileSync(join(dir, "chunks.jsonl"), '{"id":"x"}\n{broken\n');
@@ -1684,11 +1893,30 @@ describe.runIf(prisma)("KnowledgeRepository (통합)", () => {
     expect((await repo.loadActive())?.versionId).toBe(v2.versionId);
     const old = await prisma!.knowledgeVersion.findUnique({ where: { id: v1.versionId } });
     expect(old?.status).toBe("archived");
+    expect((await prisma!.knowledgeState.findUnique({ where: { id: 1 } }))?.activeVersionId).toBe(v2.versionId);
     expect(await prisma!.knowledgeChunk.count({ where: { versionId: v1.versionId } })).toBe(2);
   });
 
   it("active가 없으면 null", async () => {
     expect(await repo.loadActive()).toBeNull();
+  });
+
+  it("[P7] 같은 팩을 동시에 import하면 한 번만 적재된다", async () => {
+    const pack = await loadDomainPack(MINI);
+    const results = await Promise.all([repo.importPack(pack), repo.importPack(pack), repo.importPack(pack)]);
+    expect(results.filter((r) => !r.skipped)).toHaveLength(1);
+    expect(new Set(results.map((r) => r.versionId)).size).toBe(1);
+    expect(await prisma!.knowledgeVersion.count()).toBe(1);
+  });
+
+  it("[P7] 적재 중 실패하면 전체 롤백 — 기존 active와 버전 수 유지, failed 행 없음", async () => {
+    const pack = await loadDomainPack(MINI);
+    const v1 = await repo.importPack(pack);
+    // 로더를 우회해 DB 제약(VARCHAR(1000))을 넘는 변형 문장을 넣는다
+    const broken = { ...pack, contentHash: "e".repeat(64), faqs: pack.faqs.map((f) => ({ ...f, variants: ["가".repeat(1001)] })) };
+    await expect(repo.importPack(broken)).rejects.toThrow();
+    expect((await repo.loadActive())?.versionId).toBe(v1.versionId);
+    expect(await prisma!.knowledgeVersion.count()).toBe(1);
   });
 });
 ```
@@ -1708,9 +1936,10 @@ import { INTENT_IDS } from "../../core";
 const Prob = z.number().min(0).max(1);
 const PosInt = z.number().int().positive();
 
+// 문자열 길이는 UTF-16 코드 단위(String.length) 기준이며 DB 컬럼 길이와 맞춘다. [P8]
 export const ManifestSchema = z.object({
-  name: z.string().min(1),
-  version: z.string().min(1),
+  name: z.string().min(1).max(100),
+  version: z.string().min(1).max(50),
   language: z.string().min(2),
   template_version: z.string().min(1),
   helpdesk: z.object({ phone: z.string().min(1), email: z.string().min(1), url: z.string().optional() }),
@@ -1722,9 +1951,11 @@ export const PolicySchema = z.object({
   faq: Prob,
   relevance: z.object({ reference: Prob, answer: Prob }).refine((v) => v.reference <= v.answer, "relevance.reference ≤ relevance.answer"),
   helpdesk: Prob,
-  candidates: z.object({ faq: PosInt, chunk: PosInt }),
-  context: z.object({ max_turns: PosInt, assistant_max_chars: PosInt }),
-  deadlines: z.object({ engine_ms: PosInt, queue_ms: PosInt, limiter_ms: PosInt, save_ms: PosInt }),
+  candidates: z.object({ faq: PosInt.max(10), chunk: PosInt.max(12) }),
+  // [P8] 대화 문맥은 축소하지 않으므로 안전한 상한을 둔다
+  context: z.object({ max_turns: PosInt.max(3), assistant_max_chars: PosInt.max(500) }),
+  // [P10] 제한기 대기(limiter_ms)는 서버 설정(JEV_LIMITER_WAIT_MS)이라 팩에 두지 않는다
+  deadlines: z.object({ engine_ms: PosInt, queue_ms: PosInt, save_ms: PosInt }).strict(),
 });
 
 export const IntentsSchema = z
@@ -1735,7 +1966,7 @@ export const IntentsSchema = z
 
 export const ChunkLineSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/, "id는 소문자·숫자·하이픈"),
-  module: z.string().min(1),
+  module: z.string().min(1).max(100),
   kind: z.enum(["regulation", "how_to"]),
   title: z.string().min(1).max(200),
   section: z.string().min(1).max(200),
@@ -1745,12 +1976,15 @@ export const ChunkLineSchema = z.object({
 });
 
 export const FaqLineSchema = z.object({
-  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
+  id: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]{0,99}$/)
+    .refine((id) => id !== "none", "FAQ id 'none'은 Jev 선택지 '정답 없음'으로 예약됨"),
   intent: z.enum(INTENT_IDS),
   summary: z.string().min(1).max(500),
   applies_when: z.string().min(1).max(1000),
   answer: z.string().min(1).max(2000),
-  source_chunk_id: z.string().nullable().default(null),
+  source_chunk_id: z.string().min(1).nullable().default(null),
   variants: z.array(z.string().min(1).max(1000)).min(1),
 });
 ```
@@ -1881,7 +2115,7 @@ export async function loadDomainPack(dir: string): Promise<DomainPack> {
     deadlines: {
       engineMs: policy.deadlines.engine_ms,
       queueMs: policy.deadlines.queue_ms,
-      limiterMs: policy.deadlines.limiter_ms,
+      limiterMs: 0, // [P10] 서버 설정값으로 SnapshotService가 채운다
       saveMs: policy.deadlines.save_ms,
     },
   };
@@ -1930,19 +2164,27 @@ type PackSnapshot = Omit<DomainPack, "chunks" | "faqs" | "contentHash">;
 export class KnowledgeRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
+  /**
+   * [P7] 원자 import: knowledge_state(id=1) 행을 FOR UPDATE로 잠가 동시 import를 직렬화하고,
+   * 잠금 안에서 활성 버전의 contentHash를 다시 비교한다. 실패하면 전체 롤백(실패 버전 행을 남기지 않음).
+   */
   async importPack(pack: DomainPack): Promise<{ versionId: string; skipped: boolean }> {
-    const current = await this.prisma.knowledgeVersion.findFirst({ where: { status: "active" }, orderBy: { createdAt: "desc" } });
-    if (current && current.contentHash === pack.contentHash) return { versionId: current.id, skipped: true };
-
     const snapshot: PackSnapshot = { manifest: pack.manifest, policy: pack.policy, intents: pack.intents };
-    const versionId = await this.prisma.$transaction(
+    return this.prisma.$transaction(
       async (tx) => {
+        await tx.$executeRaw`INSERT IGNORE INTO knowledge_state (id, active_version_id) VALUES (1, NULL)`;
+        const rows = await tx.$queryRaw<{ active_version_id: string | null }[]>`SELECT active_version_id FROM knowledge_state WHERE id = 1 FOR UPDATE`;
+        const activeId = rows[0]?.active_version_id ?? null;
+        if (activeId) {
+          const active = await tx.knowledgeVersion.findUnique({ where: { id: activeId }, select: { contentHash: true } });
+          if (active?.contentHash === pack.contentHash) return { versionId: activeId, skipped: true };
+        }
         const v = await tx.knowledgeVersion.create({
           data: {
             packName: pack.manifest.name,
             packVersion: pack.manifest.version,
             contentHash: pack.contentHash,
-            status: "failed", // 적재가 끝나면 active로 바꾼다
+            status: "active",
             packSnapshot: snapshot as object,
           },
         });
@@ -1974,17 +2216,18 @@ export class KnowledgeRepository {
         await tx.faqVariant.createMany({
           data: pack.faqs.flatMap((f) => f.variants.map((text) => ({ versionId: v.id, faqId: f.id, text }))),
         });
-        await tx.knowledgeVersion.updateMany({ where: { status: "active" }, data: { status: "archived" } });
-        await tx.knowledgeVersion.update({ where: { id: v.id }, data: { status: "active" } });
-        return v.id;
+        if (activeId) await tx.knowledgeVersion.update({ where: { id: activeId }, data: { status: "archived" } });
+        await tx.knowledgeState.update({ where: { id: 1 }, data: { activeVersionId: v.id } });
+        return { versionId: v.id, skipped: false };
       },
-      { timeout: 30_000 },
+      { maxWait: 10_000, timeout: 60_000 },
     );
-    return { versionId, skipped: false };
   }
 
   async loadActive(): Promise<ActiveKnowledge | null> {
-    const v = await this.prisma.knowledgeVersion.findFirst({ where: { status: "active" }, orderBy: { createdAt: "desc" } });
+    const state = await this.prisma.knowledgeState.findUnique({ where: { id: 1 } });
+    if (!state?.activeVersionId) return null;
+    const v = await this.prisma.knowledgeVersion.findUnique({ where: { id: state.activeVersionId } });
     if (!v) return null;
     const [chunkRows, faqRows] = await Promise.all([
       this.prisma.knowledgeChunk.findMany({ where: { versionId: v.id }, orderBy: { id: "asc" } }),
@@ -2090,7 +2333,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `KnowledgeRepository`, `ActiveKnowledge`, `MapKnowledgeReader`, core `Bm25Retriever`, `ExecutionSnapshot`, `TEMPLATE_VERSION`, `ContextReader`, `CompletedTurn`, `EngineResult`, `TraceRecord`, `SourceRef`
 - Produces:
-  - `class SnapshotService` — `constructor(loader: { loadActive(): Promise<ActiveKnowledge | null> })`, `init(): Promise<void>`, `current(): ExecutionSnapshot`(없으면 throw `NoActiveKnowledgeError`), `reload(): Promise<{ versionId: string; changed: boolean }>` (single-flight: 진행 중이면 같은 promise 반환, 실패 시 이전 스냅샷 유지)
+  - `class SnapshotService` — `constructor(loader: { loadActive(): Promise<ActiveKnowledge | null> }, opts: { limiterWaitMs: number })`, `init(): Promise<void>`(활성 팩 template_version 불일치 시 `TemplateVersionMismatchError`), `current(): ExecutionSnapshot`(없으면 throw `NoActiveKnowledgeError`), `reload(): Promise<{ versionId: string; changed: boolean }>` (single-flight: 진행 중이면 같은 promise 반환, 실패 시 이전 스냅샷 유지)
   - `class NoActiveKnowledgeError extends Error`
   - `PRISMA = Symbol("PRISMA")`, `PersistenceModule`, `JevModule`(provider: `JevLimiter`, `JEV_TRANSPORT`, `JUDGE`)
   - `class TurnRepository implements ContextReader` —
@@ -2098,8 +2341,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     - `findSession(id: string): Promise<{ id: string; userId: string } | null>`
     - `findTurnByClientMsgId(sessionId: string, clientMsgId: string): Promise<TurnRow | null>`
     - `reserveTurn(input: { sessionId: string; clientMsgId: string; userText: string; retryOfTurnSeq?: number }): Promise<TurnRow>` (next_turn_seq 증가 + 삽입을 한 트랜잭션)
-    - `completeTurn(turnId: string, result: EngineResult): Promise<{ traceId: string } | null>` (`status='processing'`일 때만, 턴 갱신 + trace 삽입 한 트랜잭션; 이미 완료/실패면 null)
-    - `failTurn(turnId: string, code: string, retryable: boolean, trace?: TraceRecord): Promise<boolean>`
+    - `completeTurn(turnId: string, result: EngineResult, opts?: { saveMs?: number }): Promise<{ traceId: string } | null>` (`status='processing'`일 때만, 턴 갱신 + trace 삽입 한 트랜잭션; route=error면 errorCode/errorRetryable도 저장; 이미 완료/실패면 null; 저장 기한 초과 시 롤백 후 throw)
+    - `failTurn(turnId: string, code: string, retryable: boolean, trace?: TraceRecord, opts?: { saveMs?: number }): Promise<boolean>`
     - `sweepProcessing(code: string): Promise<number>` (모든 processing → failed, retryable=true)
     - `loadCompletedTurns(sessionId: string, beforeTurnSeq: number, limit: number): Promise<CompletedTurn[]>`
     - `listTurns(sessionId: string, opts: { beforeTurnSeq?: number; limit: number }): Promise<{ turns: TurnRow[]; hasMore: boolean }>` (turn_seq 오름차순 반환)
@@ -2110,9 +2353,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 `jev-chat-api/src/app/knowledge/snapshot.service.spec.ts`:
 ```ts
 import { describe, expect, it } from "vitest";
-import { NoActiveKnowledgeError, SnapshotService } from "./snapshot.service";
+import { NoActiveKnowledgeError, SnapshotService, TemplateVersionMismatchError } from "./snapshot.service";
 import type { ActiveKnowledge } from "../../adapters/persistence/knowledge.repository";
 import { DEFAULT_INTENTS, DEFAULT_POLICY } from "../../core";
+
+const make = (loader: ConstructorParameters<typeof SnapshotService>[0]) => new SnapshotService(loader, { limiterWaitMs: 3000 });
 
 function active(versionId: string, text = "법인카드 1회 한도 50만 원"): ActiveKnowledge {
   return {
@@ -2129,12 +2374,12 @@ function active(versionId: string, text = "법인카드 1회 한도 50만 원"):
 
 describe("SnapshotService", () => {
   it("init 전 current()는 NoActiveKnowledgeError", () => {
-    const s = new SnapshotService({ loadActive: async () => active("v1") });
+    const s = make({ loadActive: async () => active("v1") });
     expect(() => s.current()).toThrow(NoActiveKnowledgeError);
   });
 
   it("init 후 활성 버전으로 스냅샷을 만든다", async () => {
-    const s = new SnapshotService({ loadActive: async () => active("v1") });
+    const s = make({ loadActive: async () => active("v1") });
     await s.init();
     const snap = s.current();
     expect(snap.knowledgeVersionId).toBe("v1");
@@ -2145,14 +2390,14 @@ describe("SnapshotService", () => {
   });
 
   it("active가 없으면 init은 성공하되 current()는 throw", async () => {
-    const s = new SnapshotService({ loadActive: async () => null });
+    const s = make({ loadActive: async () => null });
     await s.init();
     expect(() => s.current()).toThrow(NoActiveKnowledgeError);
   });
 
   it("reload는 참조를 통째로 교체한다 — 기존에 잡아둔 스냅샷은 그대로", async () => {
     let next = active("v1");
-    const s = new SnapshotService({ loadActive: async () => next });
+    const s = make({ loadActive: async () => next });
     await s.init();
     const held = s.current();
     next = active("v2");
@@ -2162,14 +2407,14 @@ describe("SnapshotService", () => {
   });
 
   it("같은 버전이면 changed=false", async () => {
-    const s = new SnapshotService({ loadActive: async () => active("v1") });
+    const s = make({ loadActive: async () => active("v1") });
     await s.init();
     expect(await s.reload()).toEqual({ versionId: "v1", changed: false });
   });
 
   it("동시 reload는 한 번만 실행된다(single-flight)", async () => {
     let calls = 0;
-    const s = new SnapshotService({
+    const s = make({
       loadActive: async () => {
         calls++;
         await new Promise((r) => setTimeout(r, 10));
@@ -2180,9 +2425,27 @@ describe("SnapshotService", () => {
     expect(calls).toBe(1);
   });
 
+  it("[P10] 스냅샷 policy의 limiterMs는 서버 설정값", async () => {
+    const s = new SnapshotService({ loadActive: async () => active("v1") }, { limiterWaitMs: 1234 });
+    await s.init();
+    expect(s.current().policy.deadlines.limiterMs).toBe(1234);
+  });
+
+  it("[P10] 활성 팩의 template_version이 다르면 init 실패, reload는 이전 스냅샷 유지", async () => {
+    const bad = active("v9");
+    bad.pack.manifest.templateVersion = "v0";
+    await expect(make({ loadActive: async () => bad }).init()).rejects.toBeInstanceOf(TemplateVersionMismatchError);
+    let next = active("v1");
+    const s = make({ loadActive: async () => next });
+    await s.init();
+    next = bad;
+    await expect(s.reload()).rejects.toBeInstanceOf(TemplateVersionMismatchError);
+    expect(s.current().knowledgeVersionId).toBe("v1");
+  });
+
   it("reload 실패 시 이전 스냅샷을 유지하고 오류를 전달한다", async () => {
     let fail = false;
-    const s = new SnapshotService({
+    const s = make({
       loadActive: async () => {
         if (fail) throw new Error("db down");
         return active("v1");
@@ -2252,6 +2515,37 @@ describe.runIf(prisma)("TurnRepository (통합)", () => {
     expect(trace).toMatchObject({ totalInputTokens: 123, bStatus: "skipped", intent: "regulation" });
   });
 
+  it("[P4] route=error 완료는 error 메타데이터를 함께 저장, 정상 완료는 비운다", async () => {
+    const s = await repo.createSession("u1", "front-test");
+    const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });
+    const r = result("일시적인 문제", "error");
+    r.trace.errorCode = "JEV_UNAVAILABLE";
+    await repo.completeTurn(t.id, r);
+    expect(await repo.findTurnByClientMsgId(s.id, uuid(1))).toMatchObject({ status: "completed", route: "error", errorCode: "JEV_UNAVAILABLE", errorRetryable: true });
+    const t2 = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(2), userText: "q2" });
+    await repo.completeTurn(t2.id, result("정상"));
+    expect(await repo.findTurnByClientMsgId(s.id, uuid(2))).toMatchObject({ errorCode: null, errorRetryable: null });
+  });
+
+  it("[P9] trace 삽입이 실패하면 전체 롤백 — 턴은 processing으로 남는다", async () => {
+    const s = await repo.createSession("u1", "front-test");
+    const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });
+    const bad = result("답");
+    bad.trace.knowledgeVersionId = "x".repeat(40); // CHAR(36) 초과 → trace insert 실패
+    await expect(repo.completeTurn(t.id, bad)).rejects.toThrow();
+    expect(await repo.findTurnByClientMsgId(s.id, uuid(1))).toMatchObject({ status: "processing", assistantText: null, traceId: null });
+  });
+
+  it("[P9] complete와 fail이 동시에 와도 하나만 종료 상태를 만든다", async () => {
+    const s = await repo.createSession("u1", "front-test");
+    const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });
+    const [done, failed] = await Promise.all([repo.completeTurn(t.id, result("답")), repo.failTurn(t.id, "INTERNAL", false)]);
+    expect(Number(done !== null) + Number(failed)).toBe(1);
+    const row = await repo.findTurnByClientMsgId(s.id, uuid(1));
+    expect(row?.status).toBe(done !== null ? "completed" : "failed");
+    expect(await prisma!.messageTrace.count({ where: { turnId: t.id } })).toBe(done !== null ? 1 : 0);
+  });
+
   it("failTurn은 processing일 때만 실패로 바꾼다", async () => {
     const s = await repo.createSession("u1", "front-test");
     const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });
@@ -2311,10 +2605,20 @@ export class NoActiveKnowledgeError extends Error {
   }
 }
 
-function buildSnapshot(a: ActiveKnowledge): ExecutionSnapshot {
+export class TemplateVersionMismatchError extends Error {
+  constructor(packVersion: string) {
+    super(`활성 지식 팩의 template_version(${packVersion})이 서버 코드(${TEMPLATE_VERSION})와 다릅니다. 팩을 갱신해 다시 import하세요.`);
+    this.name = "TemplateVersionMismatchError";
+  }
+}
+
+function buildSnapshot(a: ActiveKnowledge, limiterWaitMs: number): ExecutionSnapshot {
+  // [P10] 재배포 후에도 활성 팩이 현재 질문 템플릿과 호환되는지 확인
+  if (a.pack.manifest.templateVersion !== TEMPLATE_VERSION) throw new TemplateVersionMismatchError(a.pack.manifest.templateVersion);
   return {
     knowledgeVersionId: a.versionId,
-    policy: a.pack.policy,
+    // [P10] 제한기 대기는 서버 설정값을 기록해 trace의 policy가 실제 동작과 일치하게 한다
+    policy: { ...a.pack.policy, deadlines: { ...a.pack.policy.deadlines, limiterMs: limiterWaitMs } },
     intents: a.pack.intents,
     helpdesk: a.pack.manifest.helpdesk,
     templateVersion: TEMPLATE_VERSION,
@@ -2328,11 +2632,15 @@ export class SnapshotService {
   private snapshot: ExecutionSnapshot | null = null;
   private inflight: Promise<{ versionId: string; changed: boolean }> | null = null;
 
-  constructor(private readonly loader: { loadActive(): Promise<ActiveKnowledge | null> }) {}
+  constructor(
+    private readonly loader: { loadActive(): Promise<ActiveKnowledge | null> },
+    private readonly opts: { limiterWaitMs: number },
+  ) {}
 
+  /** 활성 팩이 템플릿과 호환되지 않으면 TemplateVersionMismatchError로 부팅을 실패시킨다(조용히 잘못 동작하지 않음). */
   async init(): Promise<void> {
     const a = await this.loader.loadActive();
-    if (a) this.snapshot = buildSnapshot(a);
+    if (a) this.snapshot = buildSnapshot(a, this.opts.limiterWaitMs);
   }
 
   current(): ExecutionSnapshot {
@@ -2347,7 +2655,7 @@ export class SnapshotService {
         const a = await this.loader.loadActive();
         if (!a) throw new NoActiveKnowledgeError();
         const prev = this.snapshot?.knowledgeVersionId ?? null;
-        const next = buildSnapshot(a); // 빌드가 끝난 뒤에만 교체
+        const next = buildSnapshot(a, this.opts.limiterWaitMs); // 빌드가 끝난 뒤에만 교체
         this.snapshot = next;
         return { versionId: a.versionId, changed: prev !== a.versionId };
       } finally {
@@ -2478,7 +2786,18 @@ export class TurnRepository implements ContextReader {
     return toRow(t);
   }
 
-  async completeTurn(turnId: string, result: EngineResult): Promise<{ traceId: string } | null> {
+  /**
+   * [P5] 저장 기한(saveMs, 기본 3000ms)을 트랜잭션 획득 대기 + 실행 시간에 나눠 적용한다.
+   * 기한을 넘기면 Prisma가 트랜잭션을 롤백하고 예외를 던진다 — 호출자는 결과를 확인한 뒤에만 이벤트를 보낸다.
+   */
+  private txOptions(saveMs = 3000): { maxWait: number; timeout: number } {
+    const maxWait = Math.min(1000, Math.floor(saveMs / 3));
+    return { maxWait, timeout: Math.max(500, saveMs - maxWait) };
+  }
+
+  async completeTurn(turnId: string, result: EngineResult, opts: { saveMs?: number } = {}): Promise<{ traceId: string } | null> {
+    // [P4] 장애 안내(route=error)도 completed 턴이며, 재연결 시 error 메타데이터를 복원할 수 있게 함께 저장한다.
+    const isError = result.route === "error";
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.chatTurn.updateMany({
         where: { id: turnId, status: "processing" },
@@ -2487,16 +2806,18 @@ export class TurnRepository implements ContextReader {
           assistantText: result.text,
           route: result.route,
           sources: result.sources as unknown as object,
+          errorCode: isError ? (result.trace.errorCode ?? "JEV_UNAVAILABLE") : null,
+          errorRetryable: isError ? true : null,
           completedAt: new Date(),
         },
       });
       if (updated.count === 0) return null;
       const trace = await tx.messageTrace.create({ data: traceColumns(turnId, result.trace), select: { id: true } });
       return { traceId: trace.id };
-    });
+    }, this.txOptions(opts.saveMs));
   }
 
-  async failTurn(turnId: string, code: string, retryable: boolean, trace?: TraceRecord): Promise<boolean> {
+  async failTurn(turnId: string, code: string, retryable: boolean, trace?: TraceRecord, opts: { saveMs?: number } = {}): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.chatTurn.updateMany({
         where: { id: turnId, status: "processing" },
@@ -2505,7 +2826,7 @@ export class TurnRepository implements ContextReader {
       if (updated.count === 0) return false;
       if (trace) await tx.messageTrace.create({ data: traceColumns(turnId, trace) });
       return true;
-    });
+    }, this.txOptions(opts.saveMs));
   }
 
   async sweepProcessing(code: string): Promise<number> {
@@ -2609,7 +2930,7 @@ export const JUDGE = Symbol("JUDGE");
           maxConcurrent: env.JEV_MAX_CONCURRENT,
           maxRequestsPerSecond: env.JEV_MAX_RPS,
           maxTokensPerSecond: env.JEV_MAX_TPS,
-          maxWaitMs: 3000,
+          maxWaitMs: env.JEV_LIMITER_WAIT_MS,
         }),
     },
     {
@@ -2633,14 +2954,14 @@ export const JUDGE = Symbol("JUDGE");
       provide: JUDGE,
       inject: [ENV, JevLimiter, JEV_TRANSPORT],
       useFactory: (env: Env, limiter: JevLimiter, transport: JevTransport): Judge =>
-        new TypesafeJudge({ transport, limiter, attemptTimeoutMs: env.JEV_ATTEMPT_TIMEOUT_MS }),
+        new TypesafeJudge({ transport, limiter, attemptTimeoutMs: env.JEV_ATTEMPT_TIMEOUT_MS, maxRetryWaitMs: env.JEV_MAX_RETRY_WAIT_MS }),
     },
   ],
   exports: [JevLimiter, JUDGE],
 })
 export class JevModule {}
 ```
-※ 제한기 `maxWaitMs`는 policy의 `limiter_ms`와 같은 3000을 쓴다(설계 기본값). 지식 버전마다 바꿀 필요는 없다.
+※ [P10] 제한기는 같은 API 키를 쓰는 전역 자원이므로 대기 상한은 **서버 설정**(`JEV_LIMITER_WAIT_MS`)이다. domain-pack policy에서는 `limiter_ms`를 받지 않고, SnapshotService가 실행 스냅샷의 `policy.deadlines.limiterMs`에 이 서버 값을 넣어 trace에 실제 값이 기록되게 한다.
 
 `jev-chat-api/src/app/app.module.ts` 교체:
 ```ts
@@ -2668,7 +2989,11 @@ export class AppModule implements OnApplicationBootstrap {
       controllers: [HealthController],
       providers: [
         { provide: ENV, useValue: env },
-        { provide: SnapshotService, inject: [KnowledgeRepository], useFactory: (repo: KnowledgeRepository) => new SnapshotService(repo) },
+        {
+          provide: SnapshotService,
+          inject: [KnowledgeRepository],
+          useFactory: (repo: KnowledgeRepository) => new SnapshotService(repo, { limiterWaitMs: env.JEV_LIMITER_WAIT_MS }),
+        },
       ],
       exports: [ENV, SnapshotService],
     };
@@ -2682,10 +3007,55 @@ export class AppModule implements OnApplicationBootstrap {
 }
 ```
 
+- [ ] **Step 5-1: 앱 전체 DI·라우팅 HTTP 테스트 작성** [P9]
+
+`jev-chat-api/src/app/app.e2e.spec.ts`:
+```ts
+import "reflect-metadata";
+import { NestFactory } from "@nestjs/core";
+import type { INestApplication } from "@nestjs/common";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { dbConfigFromUrl } from "../adapters/persistence/prisma";
+import { AppModule } from "./app.module";
+import { validateEnv } from "./config/env.schema";
+
+const url = process.env.TEST_DATABASE_URL;
+
+describe.runIf(url)("앱 부팅 (통합)", () => {
+  let app: INestApplication;
+  let base: string;
+
+  beforeAll(async () => {
+    const db = dbConfigFromUrl(url!);
+    const env = validateEnv({
+      NODE_ENV: "test",
+      TYPESAFE_API_KEY: "test-key-not-used",
+      DB_HOST: db.host,
+      DB_PORT: String(db.port),
+      DB_USER: db.user,
+      DB_PASSWORD: db.password,
+      DB_NAME: db.database,
+      AUTH_MODE: "dev",
+      DEV_ACCESS_TOKEN: "t".repeat(32),
+    });
+    app = await NestFactory.create(AppModule.forRoot(env), { logger: false });
+    await app.listen(0);
+    base = await app.getUrl();
+  });
+  afterAll(async () => app?.close());
+
+  it("GET /api/health → 200 {status:ok} (전체 DI 그래프 부팅 포함)", async () => {
+    const res = await fetch(`${base.replace("[::1]", "127.0.0.1")}/api/health`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "ok" });
+  });
+});
+```
+
 - [ ] **Step 6: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` 그리고 `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test`
-Expected: 스냅샷 7건 PASS, 턴 저장소 통합 7건 PASS(URL 없으면 skip), core 회귀 없음
+Expected: 스냅샷 9건 PASS, 턴 저장소 통합 10건 PASS, 앱 부팅 1건 PASS(URL 없으면 통합은 skip), core 회귀 없음
 
 - [ ] **Step 7: 부팅 스모크 테스트 (사람이 준비한 `.env`와 DB 필요)**
 
@@ -2705,6 +3075,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ## 완료 조건 (계획 2A)
 - `pnpm test`, `pnpm typecheck` 통과 (DB 없이: 통합 테스트 skip)
-- `TEST_DATABASE_URL`을 준 상태에서 통합 테스트 전부 통과
+- **`TEST_DATABASE_URL`을 준 상태에서 통합 테스트 전부 통과 — 실행 결과(통과 수, skip 0건)를 최종 보고에 별도 기록** [P9]. skip된 실행만으로는 완료로 보지 않는다.
+- `prisma validate`, 생성 클라이언트 포함 전체 typecheck, 마이그레이션 SQL의 FK 동작 확인 [P6]
 - `knowledge:import`로 미니 팩 적재, 서버 부팅 후 `/api/health` 응답
 - 계획 2B가 사용할 것: `ENV`/`Env`, `PRISMA`, `TurnRepository`(+`TurnRow`), `KnowledgeRepository`, `SnapshotService`, `JUDGE`, `JevLimiter`, `createPrismaClient`, `testPrisma`/`resetTestDb`
