@@ -135,6 +135,7 @@ export class TypesafeJudge implements Judge {
         }
       } catch (e) {
         release();
+        if (e instanceof JevResponseError) return fail("invalid_response", e.message, { cause: { source: "response" } });
         if (!(e instanceof JevTransportError)) throw e; // [P3] 알 수 없는 예외는 재시도하지 않고 위로 전달(내부 오류)
         const cause = { source: "transport" as const, kind: e.kind, ...(e.status !== undefined ? { status: e.status } : {}) };
         if (e.kind === "aborted") return fail("aborted", e.message, { cause });

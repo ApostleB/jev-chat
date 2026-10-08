@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { TypesafeJudge } from "./typesafe-judge";
 import { JevLimiter } from "./limiter";
 import { JevTransportError, type JevTransport, type JevTransportResult } from "./transport";
-import { DEFAULT_INTENTS, type JevRequest, type Chunk } from "../../core";
+import { DEFAULT_INTENTS, JevResponseError, type JevRequest, type Chunk } from "../../core";
 
 const limiter = () => new JevLimiter({ maxConcurrent: 10, maxRequestsPerSecond: 100, maxTokensPerSecond: 1_000_000, maxWaitMs: 100 });
 const noSleep = async () => {};
@@ -138,6 +138,16 @@ describe("TypesafeJudge.judgeTurn", () => {
     const r = await j.judgeTurn({ message: "q", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, ctrl.signal);
     expect(r).toMatchObject({ ok: false, errorKind: "aborted" });
     expect(t.sent).toHaveLength(1);
+  });
+
+  it("[I2] 트랜스포트가 JevResponseError를 던지면 invalid_response, 재시도 없음", async () => {
+    let sends = 0;
+    const t: JevTransport = { send: async () => { sends++; throw new JevResponseError("Jev 응답 형식 오류: usage"); } };
+    const r = await judge(t).judgeTurn({ message: "q", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, signal());
+    expect(r).toMatchObject({ ok: false, errorKind: "invalid_response" });
+    expect(r.audit.cause).toEqual({ source: "response" });
+    expect(r.audit.status).toBe("failed");
+    expect(sends).toBe(1);
   });
 
   it("재시도 대기 시간은 retryAfterMs를 따른다", async () => {

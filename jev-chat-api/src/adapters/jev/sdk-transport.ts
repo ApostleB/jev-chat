@@ -7,7 +7,7 @@ import {
   RateLimitError,
   TypeSafeClient,
 } from "@typesafe-ai/sdk";
-import type { JevRequest } from "../../core";
+import { JevResponseError, type JevRequest } from "../../core";
 import { JevTransportError, type JevTransport, type JevTransportResult } from "./transport";
 
 export interface SdkLogger {
@@ -36,7 +36,7 @@ export function retryAfterFrom(headers: Headers | undefined, now: () => number =
 /** 알려진 SDK 오류만 매핑한다. [P3] 그 외(프로그래밍 오류 등)는 null → 원래 예외를 그대로 던진다. */
 export function toTransportError(err: unknown, callerSignal: AbortSignal): JevTransportError | null {
   if (err instanceof APIUserAbortError) {
-    // 시도 타임아웃은 우리 쪽 AbortSignal.timeout으로 구현되므로, 호출자 신호가 살아 있으면 timeout이다.
+    // 시도 타임아웃은 우리 쪽 타이머(AbortController)로 구현되므로, 호출자 신호가 살아 있으면 timeout이다.
     return callerSignal.aborted ? new JevTransportError("aborted", "호출자가 취소함") : new JevTransportError("timeout", "시도 시간 초과");
   }
   if (err instanceof APITimeoutError) return new JevTransportError("timeout", "시도 시간 초과");
@@ -54,6 +54,19 @@ export function toTransportError(err: unknown, callerSignal: AbortSignal): JevTr
     return new JevTransportError(kind, `요청 오류 ${err.status}`, { status: err.status, retryAfterMs: retryAfterFrom(err.headers) });
   }
   return null;
+}
+
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+
+/** 200 응답의 형태 검증. 본문·헤더는 메시지에 담지 않는다. answers 내용은 core 파서가 검증한다. */
+function checkShape(res: unknown): { model: string; answers: unknown; usage: { input_tokens: number; output_tokens: number } } {
+  if (typeof res !== "object" || res === null) throw new JevResponseError("Jev 응답 형식 오류: 객체가 아님");
+  const r = res as { model?: unknown; answers?: unknown; usage?: { input_tokens?: unknown; output_tokens?: unknown } | null };
+  if (typeof r.model !== "string") throw new JevResponseError("Jev 응답 형식 오류: model 누락");
+  if (typeof r.usage !== "object" || r.usage === null || !isCount(r.usage.input_tokens) || !isCount(r.usage.output_tokens)) {
+    throw new JevResponseError("Jev 응답 형식 오류: usage 누락 또는 잘못됨");
+  }
+  return { model: r.model, answers: r.answers, usage: { input_tokens: r.usage.input_tokens, output_tokens: r.usage.output_tokens } };
 }
 
 export class SdkJevTransport implements JevTransport {
@@ -81,10 +94,11 @@ export class SdkJevTransport implements JevTransport {
         { model: payload.model, state: payload.state as never, questions: payload.questions as never },
         { signal: attemptSignal, retry: { maxRetries: 0 } },
       );
+      const checked = checkShape(res);
       return {
-        model: res.model,
-        answers: res.answers,
-        usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens },
+        model: checked.model,
+        answers: checked.answers,
+        usage: { inputTokens: checked.usage.input_tokens, outputTokens: checked.usage.output_tokens },
       };
     } catch (err) {
       throw toTransportError(err, opts.signal) ?? err;

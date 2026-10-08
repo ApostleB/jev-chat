@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { JevTransportError } from "./transport";
 import { retryAfterFrom, SdkJevTransport, toTransportError } from "./sdk-transport";
-import type { JevRequest } from "../../core";
+import { JevResponseError, type JevRequest } from "../../core";
 
 const payload: JevRequest = {
   model: "jev-1.13.0",
@@ -99,5 +99,22 @@ describe("SdkJevTransport", () => {
       new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))))) as unknown as typeof fetch;
     const err = await transport(hanging).send(payload, { signal: new AbortController().signal, timeoutMs: 20 }).catch((e) => e);
     expect(err.kind).toBe("timeout");
+  });
+
+  it("[I2] 200 응답 형태 오류(usage 누락·비JSON·빈 본문) → JevResponseError, fetch 1회", async () => {
+    const send = (f: ReturnType<typeof fakeFetch>) => transport(f.fn).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 }).catch((e) => e);
+    const missing = fakeFetch(200, { model: "jev-1.13.0", answers: {} });
+    expect(await send(missing)).toBeInstanceOf(JevResponseError);
+    expect(missing.calls).toHaveLength(1);
+
+    const calls: unknown[] = [];
+    const html = (async (u: string) => (calls.push(u), new Response("<html>", { status: 200, headers: { "content-type": "text/html" } }))) as unknown as typeof fetch;
+    expect(await transport(html).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 }).catch((e) => e)).toBeInstanceOf(JevResponseError);
+    expect(calls).toHaveLength(1);
+
+    const emptyCalls: unknown[] = [];
+    const empty = (async (u: string) => (emptyCalls.push(u), new Response("", { status: 200 }))) as unknown as typeof fetch;
+    expect(await transport(empty).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 }).catch((e) => e)).toBeInstanceOf(JevResponseError);
+    expect(emptyCalls).toHaveLength(1);
   });
 });
