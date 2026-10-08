@@ -92,16 +92,16 @@ export class TurnRepository implements ContextReader {
 
   async reserveTurn(input: { sessionId: string; clientMsgId: string; userText: string; retryOfTurnSeq?: number }): Promise<TurnRow> {
     const t = await this.prisma.$transaction(async (tx) => {
-      // 행 잠금 + 원자 증가: 동시 예약에서도 turn_seq가 겹치지 않는다.
-      const s = await tx.chatSession.update({
-        where: { id: input.sessionId },
-        data: { nextTurnSeq: { increment: 1 }, lastActiveAt: new Date() },
-        select: { nextTurnSeq: true },
-      });
+      // Prisma update는 사전 SELECT(잠금 없는 읽기)를 먼저 실행해, MariaDB snapshot isolation에서 동시 예약 시 1020 오류가 날 수 있다.
+      // 원자 UPDATE가 먼저 행을 잠그고, 잠근 행을 current read(FOR UPDATE)로 읽는다.
+      const affected = await tx.$executeRaw`UPDATE chat_sessions SET next_turn_seq = next_turn_seq + 1, last_active_at = NOW(3) WHERE id = ${input.sessionId}`;
+      if (affected === 0) throw new Error(`세션을 찾을 수 없습니다: ${input.sessionId}`);
+      const rows = await tx.$queryRaw<{ next_turn_seq: number | bigint }[]>`SELECT next_turn_seq FROM chat_sessions WHERE id = ${input.sessionId} FOR UPDATE`;
+      const next = Number(rows[0]?.next_turn_seq);
       return tx.chatTurn.create({
         data: {
           sessionId: input.sessionId,
-          turnSeq: s.nextTurnSeq - 1,
+          turnSeq: next - 1,
           clientMsgId: input.clientMsgId,
           userText: input.userText,
           retryOfTurnSeq: input.retryOfTurnSeq ?? null,
@@ -115,7 +115,9 @@ export class TurnRepository implements ContextReader {
 
   /**
    * [P5] 저장 기한(saveMs, 기본 3000ms)을 트랜잭션 획득 대기 + 실행 시간에 나눠 적용한다.
-   * 기한을 넘기면 Prisma가 트랜잭션을 롤백하고 예외를 던진다 — 호출자는 결과를 확인한 뒤에만 이벤트를 보낸다.
+   * 주의: Prisma 트랜잭션 timeout은 진행 중인 쿼리를 취소하지 않는다. 행 잠금 대기 중이면 그 쿼리가 끝날 때
+   * (최대 innodb_lock_wait_timeout)까지 promise가 reject되지 않는다. 다만 기한 초과 트랜잭션은 커밋되지 않으므로 늦은 완료는 남지 않는다.
+   * 실제 시간 상한은 계획 2B에서 결정(DB 확인 후).
    */
   private txOptions(saveMs = 3000): { maxWait: number; timeout: number } {
     // saveMs는 팩 검증에서 1000 이상이 보장된다. 합계(maxWait+timeout)가 saveMs를 넘지 않게 나눈다.
