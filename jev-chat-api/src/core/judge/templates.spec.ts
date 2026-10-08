@@ -92,11 +92,15 @@ describe("크기 검사", () => {
     const r = buildRelevanceRequest({ message: "a", recentTurns: [], chunk: chunkFixture({ id: "c" }) })!;
     expect(checkRequestSize(r).ok).toBe(true);
   });
-  it("한도를 넘으면 recent_turns를 먼저 비우고, 그래도 넘으면 FAQ 후보를 줄인다", () => {
+  it("한도를 넘으면 recent_turns는 그대로 두고 FAQ 후보만 줄인다", () => {
     const huge = "가".repeat(15000);
+    const recentTurns = [
+      { role: "user" as const, text: "이전 질문" },
+      { role: "assistant" as const, text: "이전 답변" },
+    ];
     const r = buildTurnRequest({
       message: "질문",
-      recentTurns: [{ role: "assistant", text: huge }],
+      recentTurns,
       faqCandidates: [
         { faq: faqFixture({ id: "f1", answer: huge }), bm25Rank: 1, bm25Score: 1 },
         { faq: faqFixture({ id: "f2", answer: huge }), bm25Rank: 2, bm25Score: 1 },
@@ -104,9 +108,61 @@ describe("크기 검사", () => {
       intents: DEFAULT_INTENTS,
     });
     expect(r).not.toBeNull();
-    expect(r!.state.recent_turns).toEqual([]);
-    expect((r!.state.faq_candidates as unknown[]).length).toBeLessThan(2);
+    expect(r!.state.recent_turns).toEqual(recentTurns);
+    const kept = r!.state.faq_candidates as { id: string }[];
+    expect(kept.map((c) => c.id)).toEqual(["f1"]);
     expect(checkRequestSize(r!).ok).toBe(true);
+  });
+  it("FAQ를 모두 빼도 넘으면 null (문맥을 줄이지 않는다)", () => {
+    const r = buildTurnRequest({
+      message: "질문",
+      recentTurns: [{ role: "user", text: "가".repeat(22000) }],
+      faqCandidates: [{ faq: faqFixture({ id: "f1", answer: "답" }), bm25Rank: 1, bm25Score: 1 }],
+      intents: DEFAULT_INTENTS,
+    });
+    expect(r).toBeNull();
+  });
+  it("A와 모든 B는 같은 recent_turns를 보낸다", () => {
+    const recentTurns = [
+      { role: "user" as const, text: "법인카드 한도?" },
+      { role: "assistant" as const, text: "1회 50만 원입니다." },
+    ];
+    const huge = "가".repeat(15000);
+    const a = buildTurnRequest({
+      message: "그럼 회식비는요?",
+      recentTurns,
+      faqCandidates: [
+        { faq: faqFixture({ id: "f1", answer: huge }), bm25Rank: 1, bm25Score: 1 },
+        { faq: faqFixture({ id: "f2", answer: huge }), bm25Rank: 2, bm25Score: 1 },
+      ],
+      intents: DEFAULT_INTENTS,
+    })!;
+    expect((a.state.faq_candidates as unknown[]).length).toBe(1); // 축소가 실제로 일어났다
+    const bs = [chunkFixture({ id: "c1" }), chunkFixture({ id: "c2", text: "다른 본문" })].map(
+      (chunk) => buildRelevanceRequest({ message: "그럼 회식비는요?", recentTurns, chunk })!,
+    );
+    for (const b of bs) expect(b.state.recent_turns).toEqual(a.state.recent_turns);
+  });
+  it("문맥을 유지하면 B가 한도를 넘는 경우 null (문맥 제거 대체 경로 없음)", () => {
+    const recentTurns = [{ role: "user" as const, text: "가".repeat(11000) }];
+    const chunk = chunkFixture({ id: "c", text: "가".repeat(11000) });
+    // 문맥 없이는 통과하는 크기임을 먼저 확인
+    expect(buildRelevanceRequest({ message: "질문", recentTurns: [], chunk })).not.toBeNull();
+    expect(buildRelevanceRequest({ message: "질문", recentTurns, chunk })).toBeNull();
+  });
+  it("state+최장 질문 32000 토큰은 통과, 32001은 거부 (독립 계산 fixture)", () => {
+    // 이 fixture의 문자열은 전부 ASCII라 토큰 = ceil(JSON 길이 / 3). checkRequestSize의 산술을 쓰지 않고 길이로 직접 맞춘다.
+    const chunk = chunkFixture({ id: "c", title: "t", section: "s", text: "x" });
+    const make = (n: number) => buildRelevanceRequest({ message: "a".repeat(n), recentTurns: [], chunk });
+    const probe = buildRelevanceRequest({ message: "", recentTurns: [], chunk })!;
+    const questionTokens = Math.ceil(JSON.stringify(probe.questions.relevant).length / 3);
+    const baseLen = JSON.stringify(probe.state).length;
+    const targetStateLen = 3 * (32000 - questionTokens); // ceil(len/3) = 32000 - questionTokens
+    const atLimit = make(targetStateLen - baseLen);
+    const over = make(targetStateLen - baseLen + 1); // ceil((len+1)/3) = 32001 - questionTokens
+    expect(atLimit).not.toBeNull();
+    expect(Math.ceil(JSON.stringify(atLimit!.state).length / 3) + questionTokens).toBe(32000);
+    expect(over).toBeNull();
   });
   it("메시지 자체가 한도를 넘으면 null", () => {
     const r = buildRelevanceRequest({ message: "가".repeat(40000), recentTurns: [], chunk: chunkFixture({ id: "c" }) });

@@ -103,29 +103,25 @@ function assembleTurn(req: TurnJudgeRequest, recentTurns: TurnJudgeRequest["rece
   return { model: JEV_MODEL, state, questions };
 }
 
-/** 한도 초과 시 recent_turns → FAQ 후보(뒤에서부터) 순으로 줄인다. 그래도 넘으면 null. */
+/** 한도 초과 시 FAQ 후보만 뒤에서부터 줄인다. recent_turns는 항상 원본 그대로(A/B 문맥 일치). FAQ 0개로도 넘으면 null. */
 export function buildTurnRequest(req: TurnJudgeRequest): JevRequest | null {
-  let candidate = assembleTurn(req, req.recentTurns, req.faqCandidates.length);
-  if (checkRequestSize(candidate).ok) return candidate;
   for (let n = req.faqCandidates.length; n >= 0; n--) {
-    candidate = assembleTurn(req, [], n);
+    const candidate = assembleTurn(req, req.recentTurns, n);
     if (checkRequestSize(candidate).ok) return candidate;
   }
   return null;
 }
 
+/** 문맥 제거 대체 경로 없음. 한도를 넘으면 null. */
 export function buildRelevanceRequest(req: RelevanceRequest): JevRequest | null {
-  const make = (recentTurns: RelevanceRequest["recentTurns"]): JevRequest => ({
+  const r: JevRequest = {
     model: JEV_MODEL,
     state: {
       employee_message: req.message,
-      recent_turns: recentTurns,
+      recent_turns: req.recentTurns,
       passage: { title: req.chunk.title, section: req.chunk.section, text: req.chunk.text },
     },
     questions: { relevant: RELEVANT_QUESTION },
-  });
-  const full = make(req.recentTurns);
-  if (checkRequestSize(full).ok) return full;
-  const trimmed = make([]);
-  return checkRequestSize(trimmed).ok ? trimmed : null;
+  };
+  return checkRequestSize(r).ok ? r : null;
 }
