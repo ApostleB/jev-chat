@@ -186,7 +186,7 @@ export function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbo
 - `templates.spec.ts`: 질문이 여러 개인 64k 독립 fixture — state+최장 질문은 32k 이하로 유지하면서 전체 합만 64,000 / 64,001이 되도록 만들어 통과/초과를 각각 확인.
 - `chat-engine.spec.ts`: (a) B 하나만 기한 초과(나머지는 완료) → 완료된 B의 `usage`가 jevCalls에 보존되고 bStatus `partial`, (b) A 완료 직후 abort → 결정은 A 기준으로 정상 진행. 합성 audit(`attempts: 0`)은 "미완료·미측정" 의미임을 `ports.ts` 주석에 명시.
 
-- [ ] **0-10: 확인과 커밋**
+- [x] **0-10: 확인과 커밋**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` → 전부 PASS
 하위 항목별 커밋(예: `fix(core): in_scope 부동소수점 허용오차(계획1 최종리뷰)`, `fix(core): 이미 취소된 신호의 미처리 rejection 제거(Codex L1)`), 0-1은 `feat(core): JevCallAudit에 실패 원인(cause) 추가 (계획 2A P3 선행)`.
