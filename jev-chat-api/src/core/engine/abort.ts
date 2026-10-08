@@ -17,10 +17,8 @@ export function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbo
   });
 }
 
-/** 부모가 abort되면 함께 abort되는 자식 컨트롤러 */
-export function linkedController(parent: AbortSignal): AbortController {
-  const child = new AbortController();
-  if (parent.aborted) child.abort(parent.reason);
-  else parent.addEventListener("abort", () => child.abort(parent.reason), { once: true });
-  return child;
+/** 부모가 abort되면 함께 abort되는 자식. AbortSignal.any는 GC 친화적이라 수명이 긴 부모에서도 리스너가 쌓이지 않는다. */
+export function linkedController(parent: AbortSignal): { signal: AbortSignal; abort: (reason?: unknown) => void } {
+  const own = new AbortController();
+  return { signal: AbortSignal.any([parent, own.signal]), abort: (reason?: unknown) => own.abort(reason) };
 }

@@ -118,7 +118,7 @@ export const DEFAULT_POLICY: Policy = deepFreeze({ /* 기존 값 그대로 */ })
 ```
 (스냅샷 서비스는 팩의 policy 객체를 새로 만들므로 영향 없음.)
 
-- [ ] **0-4: linkedController → AbortSignal.any (리스너 누수 제거)**
+- [x] **0-4: linkedController → AbortSignal.any (리스너 누수 제거)**
 
 `abort.ts`의 `linkedController`를 다음으로 바꾼다:
 ```ts
