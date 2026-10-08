@@ -279,6 +279,11 @@ describe("ChatEngine", () => {
       const r = await engine(judge, stuck as never).handle(input("법인카드 한도", AbortSignal.timeout(20)));
       expect(performance.now() - t).toBeLessThan(100);
       expect(r.route).toBe("error");
+      // [6-8] 문맥 단계에서 기한이 끝났으므로 Judge는 한 번도 호출되지 않고, A는 기한 초과 합성 audit이다
+      expect(judge.turnCalls).toHaveLength(0);
+      expect(judge.relevanceCalls).toHaveLength(0);
+      expect(r.trace.jevCalls[0]).toMatchObject({ call: "turn", status: "failed", errorKind: "timeout", attempts: 0 });
+      expect(r.trace.jevCalls.filter((c) => c.call === "relevance").every((c) => c.status === "failed" && c.errorKind === "timeout")).toBe(true);
     });
   });
 

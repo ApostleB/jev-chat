@@ -35,6 +35,8 @@ describe("부동소수점 경계", () => {
     const r = decideFromTurn(P, turn({ regulation: 0.05, how_to: 0.3, error: 0.05, out_of_scope: 0.6 }), faqCands);
     expect(r).toEqual({ route: "clarify", reason: "scope" });
   });
+  // 참고(6-8): needsHelpdesk는 두 값만 더하므로 round9가 없어도 이 경계는 통과한다. 5~9자리 소수 쌍 수십만 개를 탐색해도
+  // 부동소수 합이 0.5 미만이 되는 조합을 찾지 못해, 여기의 round9는 방어용일 뿐 이 테스트로 필요성을 증명할 수 없다.
   it("helpdesk 합 0.1+0.2+0.2 = 0.5 경계는 헬프데스크", () => {
     expect(needsHelpdesk(P, probs({ error: 0.1 + 0.2, account_access: 0.2 }))).toBe(true);
     expect(needsHelpdesk(P, probs({ error: 0.1 + 0.2, account_access: 0.19 }))).toBe(false);

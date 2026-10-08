@@ -44,6 +44,7 @@ describe("validateEnv", () => {
     expect(() => validateEnv({ ...base, NODE_ENV: "production" })).toThrow(/AUTH_MODE=dev/);
   });
   it("오류 메시지에 비밀 값이 들어가지 않는다", () => {
+    expect.assertions(1);
     try {
       validateEnv({ ...base, DEV_ACCESS_TOKEN: "secret-short" });
     } catch (e) {
