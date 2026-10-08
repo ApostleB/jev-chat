@@ -22,7 +22,8 @@ export class KnowledgeRepository {
     const snapshot: PackSnapshot = { manifest: pack.manifest, policy: pack.policy, intents: pack.intents };
     return this.prisma.$transaction(
       async (tx) => {
-        await tx.$executeRaw`INSERT IGNORE INTO knowledge_state (id, active_version_id) VALUES (1, NULL)`;
+        // INSERT IGNORE는 중복 시 공유(S) 락만 잡아 FOR UPDATE와 교착(1213)하므로, 중복이어도 배타(X) 락을 잡는 ON DUPLICATE KEY UPDATE를 쓴다.
+        await tx.$executeRaw`INSERT INTO knowledge_state (id, active_version_id) VALUES (1, NULL) ON DUPLICATE KEY UPDATE id = id`;
         const rows = await tx.$queryRaw<{ active_version_id: string | null }[]>`SELECT active_version_id FROM knowledge_state WHERE id = 1 FOR UPDATE`;
         const activeId = rows[0]?.active_version_id ?? null;
         if (activeId) {
