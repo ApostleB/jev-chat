@@ -3205,7 +3205,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 > Task 5 다음, 계획 2B 시작 전에 처리한다. 항목별 TDD + 커밋.
 
 - [x] **6-1 (T1) linkedController가 부모 신호의 수명을 보장**: 반환 객체가 부모 `AbortSignal`을 강하게 참조하도록 한다(`{ signal, abort, parent }`). 회귀 테스트는 별도 프로세스에서 `node --expose-gc`로 실행하는 스크립트 테스트로 추가한다: `linkedController(AbortSignal.timeout(300)).signal`만 유지 + 25ms마다 `gc()` → 1초 안에 abort되어야 한다(수정 전에는 미발화가 재현됨). 이 테스트는 `vitest`에서 `child_process.execFileSync(process.execPath, ["--expose-gc", "--import", "tsx", "<probe>.ts"])`로 실행한다.
-- [ ] **6-2 (T2) 응답 형태 검증 강화**: `usage.input_tokens`/`output_tokens`는 0 이상의 **정수**, `model`은 빈 문자열 금지. 위반 시 `invalid_response`.
+- [x] **6-2 (T2) 응답 형태 검증 강화**: `usage.input_tokens`/`output_tokens`는 0 이상의 **정수**, `model`은 빈 문자열 금지. 위반 시 `invalid_response`.
 - [ ] **6-3 (T3) abortableSleep 정리**: 정상 만료 시 abort 리스너 제거(`{ once: true }` + `removeEventListener`).
 - [ ] **6-4 (T4) B 합성 audit 원인 구분**: 엔진 기한 초과로 끝난 B는 `errorKind: "timeout"`, FAQ 조기 확정 등으로 취소된 B는 `"aborted"` — A와 같은 방식(`signal.reason`의 `TimeoutError` 여부)으로 기록.
 - [ ] **6-5 SDK 시도 타임아웃 전달**: `systemOne` 호출 옵션에 `timeout: opts.timeoutMs`도 넘겨 SDK 기본 10초가 설정값을 덮지 않게 한다.

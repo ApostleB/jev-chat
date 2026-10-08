@@ -117,4 +117,23 @@ describe("SdkJevTransport", () => {
     expect(await transport(empty).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 }).catch((e) => e)).toBeInstanceOf(JevResponseError);
     expect(emptyCalls).toHaveLength(1);
   });
+
+  it("[6-2] usage 토큰이 음수·소수·비수치거나 model이 빈 문자열이면 JevResponseError", async () => {
+    const base = { model: "jev-1.13.0", answers: {}, usage: { input_tokens: 1, output_tokens: 1 } };
+    const bad: unknown[] = [
+      { ...base, usage: { input_tokens: 1.5, output_tokens: 1 } },
+      { ...base, usage: { input_tokens: 1, output_tokens: 0.2 } },
+      { ...base, usage: { input_tokens: -1, output_tokens: 1 } },
+      { ...base, usage: { input_tokens: 1, output_tokens: "3" } },
+      { ...base, model: "" },
+    ];
+    for (const body of bad) {
+      const f = fakeFetch(200, body);
+      const err = await transport(f.fn).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 }).catch((e) => e);
+      expect(err, JSON.stringify(body)).toBeInstanceOf(JevResponseError);
+      expect(f.calls).toHaveLength(1);
+    }
+    const zero = fakeFetch(200, { ...base, usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(transport(zero.fn).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 })).resolves.toMatchObject({ usage: { inputTokens: 0, outputTokens: 0 } });
+  });
 });

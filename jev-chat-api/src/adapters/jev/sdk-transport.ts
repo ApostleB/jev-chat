@@ -56,13 +56,13 @@ export function toTransportError(err: unknown, callerSignal: AbortSignal): JevTr
   return null;
 }
 
-const isCount = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
 
 /** 200 응답의 형태 검증. 본문·헤더는 메시지에 담지 않는다. answers 내용은 core 파서가 검증한다. */
 function checkShape(res: unknown): { model: string; answers: unknown; usage: { input_tokens: number; output_tokens: number } } {
   if (typeof res !== "object" || res === null) throw new JevResponseError("Jev 응답 형식 오류: 객체가 아님");
   const r = res as { model?: unknown; answers?: unknown; usage?: { input_tokens?: unknown; output_tokens?: unknown } | null };
-  if (typeof r.model !== "string") throw new JevResponseError("Jev 응답 형식 오류: model 누락");
+  if (typeof r.model !== "string" || r.model === "") throw new JevResponseError("Jev 응답 형식 오류: model 누락");
   if (typeof r.usage !== "object" || r.usage === null || !isCount(r.usage.input_tokens) || !isCount(r.usage.output_tokens)) {
     throw new JevResponseError("Jev 응답 형식 오류: usage 누락 또는 잘못됨");
   }
