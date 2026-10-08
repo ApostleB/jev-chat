@@ -2106,7 +2106,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Produces (abort.ts): `raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbort: () => T): Promise<T>`, `linkedController(parent: AbortSignal): AbortController`
 - Produces (fakes.ts): `class FakeJudge implements Judge` (동작을 함수로 주입), `InMemoryKnowledge implements KnowledgeReader`, `InMemoryContextReader implements ContextReader`, `makeSnapshot(opts): ExecutionSnapshot`, `okTurn(...)`, `okRelevance(...)`
 
-- [ ] **Step 1: abort 유틸과 가짜 구현 작성** (엔진 테스트의 준비물)
+- [x] **Step 1: abort 유틸과 가짜 구현 작성** (엔진 테스트의 준비물)
 
 `jev-chat-api/src/core/engine/abort.ts`:
 ```ts
@@ -2233,7 +2233,7 @@ export function makeSnapshot(opts: { chunks: Chunk[]; faqs: Faq[]; policy?: Poli
 }
 ```
 
-- [ ] **Step 2: 실패 테스트 작성**
+- [x] **Step 2: 실패 테스트 작성**
 
 `jev-chat-api/src/core/engine/chat-engine.spec.ts`:
 ```ts
@@ -2404,12 +2404,12 @@ describe("ChatEngine", () => {
 });
 ```
 
-- [ ] **Step 3: 실행 → 실패 확인**
+- [x] **Step 3: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- chat-engine`
 Expected: FAIL — `Cannot find module './chat-engine'`
 
-- [ ] **Step 4: 엔진 구현**
+- [x] **Step 4: 엔진 구현**
 
 `jev-chat-api/src/core/engine/chat-engine.ts`:
 ```ts
@@ -2645,12 +2645,12 @@ export class ChatEngine {
 }
 ```
 
-- [ ] **Step 5: 실행 → 통과 확인**
+- [x] **Step 5: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck`
 Expected: PASS (엔진 12 tests 포함 전체), 타입 오류 없음
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add jev-chat-api
