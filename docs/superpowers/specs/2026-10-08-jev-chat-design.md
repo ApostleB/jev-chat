@@ -290,7 +290,7 @@ type ErrorCode = "UNAUTHORIZED" | "FORBIDDEN" | "PROTOCOL_UNSUPPORTED" | "INVALI
 | S→C | `chat:status` | `{ sessionId, clientMsgId, turnSeq, stage: queued\|judging\|answering }` | 진행 표시 |
 | S→C | `chat:done` | `{ sessionId, clientMsgId, turnSeq, turnId, text, route, sources[], traceId, error? }` | 최종 답변. `route=error`이면 `error: { code, retryable }` 필수, 그 외에는 없음 |
 | S→C | `chat:error` | `{ sessionId, clientMsgId, turnSeq, code, message, retryable }` | 턴 실패 (failed) |
-| S→C | `chat:trace` | `{ traceId, trace }` | debug 권한 소켓에만 |
+| S→C | `chat:trace` | `{ sessionId, traceId, trace }` | debug 권한 소켓에만 (sessionId로 이전 세션의 늦은 trace 구분) |
 
 - `Turn`: `{ turnId, turnSeq, clientMsgId, userText, status, assistantText?, route?, sources?, error?: {code, retryable}, traceId? }`
 - **재연결 동기화** [F1][R10]: 클라이언트는 재연결 시 `session:start { sessionId }`로 최신 50턴을 받아 `turnSeq` 기준으로 **upsert**한다(이미 본 턴의 늦은 완료·실패도 반영됨). 더 오래된 턴은 `beforeTurnSeq` + `hasMore`로 페이지 단위로 받는다.
