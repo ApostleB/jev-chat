@@ -1,0 +1,27 @@
+# 시크릿 — 절대 커밋 금지 (.env.example만 허용)
+.env
+.env.*
+!.env.example
+
+# 의존성 / 빌드 산출물
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# 로그
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# 개인 로컬 설정
+.claude/settings.local.json
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+
+# 개발용 DB 데이터 (docker volume을 로컬 폴더로 마운트할 경우)
+infra/data/
