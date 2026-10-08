@@ -9,6 +9,7 @@ export type {
   JudgeOutcome,
   JudgeErrorKind,
   JevCallAudit,
+  JevCallCause,
   TurnJudgeRequest,
   RelevanceRequest,
   TurnJudgment,

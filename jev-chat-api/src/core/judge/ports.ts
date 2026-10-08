@@ -30,6 +30,14 @@ export interface TurnJudgment {
 
 export type JudgeErrorKind = "provider" | "timeout" | "aborted" | "invalid_response" | "too_large";
 
+/** 실패 원인 증거. 평가에서 외부 장애(429/529/5xx/연결)와 내부·설정 오류를 구분하는 데 쓴다. 원문 메시지·헤더·키는 담지 않는다. */
+export interface JevCallCause {
+  source: "transport" | "limiter" | "response" | "size";
+  /** transport: rate_limited|overloaded|server|timeout|connection|client|aborted, limiter: timeout|oversized|aborted */
+  kind?: string;
+  status?: number;
+}
+
 export interface JevCallAudit {
   call: "turn" | "relevance";
   chunkId?: string;
@@ -43,6 +51,7 @@ export interface JevCallAudit {
   /** 허용된 응답 필드만 (answers 객체). SDK 객체·헤더 금지 */
   answer?: unknown;
   errorKind?: JudgeErrorKind;
+  cause?: JevCallCause;
 }
 
 export type JudgeOutcome<T> =

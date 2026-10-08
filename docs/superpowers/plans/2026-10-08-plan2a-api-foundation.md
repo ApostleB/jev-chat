@@ -75,7 +75,7 @@ jev-chat/
 **Interfaces:**
 - Produces: `interface JevCallCause { source: "transport" | "limiter" | "response" | "size"; kind?: string; status?: number }`, `JevCallAudit.cause?: JevCallCause`, `export type EngineDeps`(chat-engine), `ContextReader.loadCompletedTurns`는 시그니처 유지(엔진이 abort로 감쌈)
 
-- [ ] **0-1: JevCallCause 추가 [P3]**
+- [x] **0-1: JevCallCause 추가 [P3]**
 
 `ports.ts`의 `JevCallAudit` 위에 추가하고 필드를 하나 더한다:
 ```ts
