@@ -41,6 +41,7 @@ export { MESSAGES } from "./answer/messages";
 export { ExtractiveAnswerer, type Answerer, type AnswerInput, type AnswerOutput, type KnowledgeReader } from "./answer/extractive";
 export {
   ChatEngine,
+  type EngineDeps,
   type ContextReader,
   type ExecutionSnapshot,
   type HandleMessageInput,

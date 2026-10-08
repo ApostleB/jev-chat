@@ -234,4 +234,49 @@ describe("ChatEngine", () => {
     expect(judge.relevanceCalls).toHaveLength(2);
     expect(lateRejected).toBeGreaterThan(0);
   });
+
+  describe("기한 초과와 취소의 구분 (0-5)", () => {
+    const hangingJudge = () =>
+      new FakeJudge(
+        (_req, signal) => hangUntilAbort(signal, () => failedTurn()),
+        (req, signal) => hangUntilAbort(signal, () => okRelevance(req.chunk.id, 0)),
+      );
+
+    it("기한(TimeoutError) 초과로 A가 미완료면 jevCalls[0]은 failed/timeout", async () => {
+      const r = await engine(hangingJudge()).handle(input("법인카드 한도", AbortSignal.timeout(5)));
+      expect(r.route).toBe("error");
+      expect(r.trace.jevCalls[0]).toMatchObject({ call: "turn", status: "failed", errorKind: "timeout" });
+    });
+
+    it("일반 abort면 jevCalls[0]은 aborted/aborted", async () => {
+      const ctrl = new AbortController();
+      const p = engine(hangingJudge()).handle(input("법인카드 한도", ctrl.signal));
+      setTimeout(() => ctrl.abort(), 5);
+      const r = await p;
+      expect(r.route).toBe("error");
+      expect(r.trace.jevCalls[0]).toMatchObject({ call: "turn", status: "aborted", errorKind: "aborted" });
+    });
+
+    it("A 성공(FAQ 미확정) 후 B 대기 중 기한 초과 → relevance_failed error, 기한+100ms 이내", async () => {
+      const judge = new FakeJudge(
+        async () => okTurn({ regulation: 1 }),
+        (req, signal) => hangUntilAbort(signal, () => okRelevance(req.chunk.id, 0.9)),
+      );
+      const t = performance.now();
+      const r = await engine(judge).handle(input("법인카드 회식비", AbortSignal.timeout(30)));
+      expect(performance.now() - t).toBeLessThan(30 + 100);
+      expect(r.route).toBe("error");
+      expect(r.trace.bStatus).toBe("failed");
+      expect(r.trace.errorCode).toBe("JEV_UNAVAILABLE");
+    });
+
+    it("멈춘 ContextReader도 엔진 기한 안에서 error로 끝난다", async () => {
+      const stuck = { loadCompletedTurns: () => new Promise<never>(() => {}) };
+      const judge = hangingJudge();
+      const t = performance.now();
+      const r = await engine(judge, stuck as never).handle(input("법인카드 한도", AbortSignal.timeout(20)));
+      expect(performance.now() - t).toBeLessThan(100);
+      expect(r.route).toBe("error");
+    });
+  });
 });

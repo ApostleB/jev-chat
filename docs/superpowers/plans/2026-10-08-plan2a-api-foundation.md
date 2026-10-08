@@ -130,7 +130,7 @@ export function linkedController(parent: AbortSignal): { signal: AbortSignal; ab
 ```
 엔진의 `bController.abort()`/`bController.signal` 사용은 그대로 동작해야 한다. 테스트: 부모 abort → 자식 abort, 자식 abort → 부모는 그대로, 같은 부모로 1000번 만들어도 부모 abort 시 모두 abort.
 
-- [ ] **0-5: 기한 초과와 다른 abort 구분 + 문맥 로딩도 기한 안에서**
+- [x] **0-5: 기한 초과와 다른 abort 구분 + 문맥 로딩도 기한 안에서**
 
 `chat-engine.ts`:
 - A가 끝나기 전 signal이 abort된 경우의 합성 audit: `errorKind`를 `signal.reason`이 `TimeoutError`(`(signal.reason as Error)?.name === "TimeoutError"`)면 `"timeout"`, 아니면 `"aborted"`로 기록하고 `status`는 각각 `"failed"` / `"aborted"`.

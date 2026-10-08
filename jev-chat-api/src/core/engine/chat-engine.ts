@@ -81,7 +81,7 @@ export interface EngineResult {
   trace: TraceRecord;
 }
 
-interface EngineDeps {
+export interface EngineDeps {
   judge: Judge;
   answerer: Answerer;
   contextReader: ContextReader;
@@ -103,7 +103,12 @@ export class ChatEngine {
     const { policy } = snapshot;
 
     // ① 문맥 ② 후보
-    const turns = await this.deps.contextReader.loadCompletedTurns(input.sessionId, input.turnSeq, policy.context.maxTurns);
+    // DB가 멈춰도 엔진 기한을 넘기지 않는다(abort되면 빈 문맥으로 진행 → A가 즉시 미완료 처리)
+    const turns = await raceWithAbort(
+      this.deps.contextReader.loadCompletedTurns(input.sessionId, input.turnSeq, policy.context.maxTurns),
+      signal,
+      () => [] as CompletedTurn[],
+    );
     const ctx = buildContext(turns, policy.context);
     const queries = buildQueries(input.text, ctx);
     const faqCandidates = snapshot.retriever.searchFaqs(queries.faq, policy.candidates.faq);
@@ -167,7 +172,7 @@ export class ChatEngine {
       );
 
       const jevCalls: JevCallAudit[] = [
-        ...(turnOutcome ? [turnOutcome.audit] : [{ call: "turn" as const, status: "aborted" as const, attempts: 0, latencyMs: turnEnd - turnStart, errorKind: "timeout" as const }]),
+        ...(turnOutcome ? [turnOutcome.audit] : [this.unfinishedTurnAudit(signal, turnEnd - turnStart)]),
         ...settled.map((s) =>
           s.outcome === "aborted"
             ? { call: "relevance" as const, chunkId: s.candidate.chunk.id, status: "aborted" as const, attempts: 0, latencyMs: 0 }
@@ -230,6 +235,12 @@ export class ChatEngine {
       // 정상·예외 어느 쪽이든 남은 B 호출을 정리한다(이미 끝난 B에는 영향 없음)
       bController.abort();
     }
+  }
+
+  /** A가 끝나기 전 signal이 abort된 경우의 합성 audit. 기한 초과(TimeoutError)와 그 밖의 취소를 구분한다. */
+  private unfinishedTurnAudit(signal: AbortSignal, latencyMs: number): JevCallAudit {
+    const timedOut = (signal.reason as Error | undefined)?.name === "TimeoutError";
+    return { call: "turn", status: timedOut ? "failed" : "aborted", attempts: 0, latencyMs, errorKind: timedOut ? "timeout" : "aborted" };
   }
 
   private bStatusOf(count: number, settled: RelevanceSettled[]): BStatus {
