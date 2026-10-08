@@ -879,7 +879,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `interface SearchQueries { faq: string; chunks: string[] }`
   - `buildQueries(message: string, ctx: ConversationContext): SearchQueries`
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/core/retrieval/retriever.spec.ts`:
 ```ts
@@ -1013,12 +1013,12 @@ export function faqFixture(p: Partial<Faq> & Pick<Faq, "id">): Faq {
 }
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- retriever context`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `jev-chat-api/src/core/retrieval/retriever.ts`:
 ```ts
@@ -1155,12 +1155,12 @@ export function buildQueries(message: string, ctx: ConversationContext): SearchQ
 }
 ```
 
-- [ ] **Step 4: 실행 → 통과 확인**
+- [x] **Step 4: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck`
 Expected: PASS, 타입 오류 없음
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add jev-chat-api
