@@ -1,4 +1,4 @@
-import type { CompletedTurn } from "../domain/types";
+import type { CompletedTurn, SourceLabel } from "../domain/types";
 
 export interface RecentTurn {
   role: "user" | "assistant";
@@ -9,7 +9,7 @@ export interface ConversationContext {
   recentTurns: RecentTurn[];
   turnSeqs: number[];
   previousUserText: string | null;
-  previousSourceTitles: string[];
+  previousSources: SourceLabel[];
 }
 
 export interface SearchQueries {
@@ -27,7 +27,7 @@ export function buildContext(
   turns: CompletedTurn[],
   opts: { maxTurns: number; assistantMaxChars: number },
 ): ConversationContext {
-  const recent = turns.slice(-opts.maxTurns);
+  const recent = opts.maxTurns <= 0 ? [] : turns.slice(-opts.maxTurns);
   const last = recent.at(-1);
   return {
     recentTurns: recent.flatMap((t) => [
@@ -36,13 +36,13 @@ export function buildContext(
     ]),
     turnSeqs: recent.map((t) => t.turnSeq),
     previousUserText: last?.userText ?? null,
-    previousSourceTitles: last?.sourceTitles ?? [],
+    previousSources: last?.sources ?? [],
   };
 }
 
 export function buildQueries(message: string, ctx: ConversationContext): SearchQueries {
   const q1 = message;
   if (ctx.previousUserText === null) return { faq: message, chunks: [q1] };
-  const q2 = [message, ctx.previousUserText, ...ctx.previousSourceTitles].join(" ");
+  const q2 = [message, ctx.previousUserText, ...ctx.previousSources.map((s) => `${s.title} ${s.section}`)].join(" ");
   return { faq: message, chunks: [q1, q2] };
 }

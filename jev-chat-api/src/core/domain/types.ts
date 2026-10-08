@@ -57,12 +57,17 @@ export interface Principal {
   roles: Role[];
 }
 
+export interface SourceLabel {
+  title: string;
+  section: string;
+}
+
 /** 문맥으로 쓰는 완료된 턴 (turnSeq 오름차순) */
 export interface CompletedTurn {
   turnSeq: number;
   userText: string;
   assistantText: string;
-  sourceTitles: string[];
+  sources: SourceLabel[];
 }
 
 export interface SourceRef {
