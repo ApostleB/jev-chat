@@ -120,13 +120,18 @@ export class ChatEngine {
     const bController = linkedController(signal);
     try {
       const turnStart = this.now();
-      const turnPromise = this.deps.judge.judgeTurn(
-        { message: input.text, recentTurns: ctx.recentTurns, faqCandidates, intents: snapshot.intents },
-        signal,
-      );
+      // 취소가 확정됐으면 외부 호출을 시작하지 않는다(A 미완료·B 미시작으로 결정 단계로 진행)
+      const cancelled = signal.aborted;
+      const turnPromise = cancelled
+        ? null
+        : this.deps.judge.judgeTurn(
+            { message: input.text, recentTurns: ctx.recentTurns, faqCandidates, intents: snapshot.intents },
+            signal,
+          );
       let relevanceEnd: number | null = null;
       const relevancePromises: Promise<RelevanceSettled>[] = chunkCandidates.map((candidate) => {
       // 동기 throw도 rejection으로 바꿔 map이 끊기지 않게 한다(A와 B는 같은 동기 구간에서 시작)
+      if (cancelled) return Promise.resolve<RelevanceSettled>({ candidate, outcome: "aborted" });
       const p = raceWithAbort<RelevanceSettled>(
         (async () => ({
           candidate,
@@ -140,7 +145,7 @@ export class ChatEngine {
       return p;
     });
 
-    const turnOutcome = await raceWithAbort<JudgeOutcome<TurnJudgment> | null>(turnPromise, signal, () => null);
+    const turnOutcome = (turnPromise ? await raceWithAbort<JudgeOutcome<TurnJudgment> | null>(turnPromise, signal, () => null) : null);
       const turnEnd = this.now();
 
       // ④ FAQ 조기 확정 / 종료 검사

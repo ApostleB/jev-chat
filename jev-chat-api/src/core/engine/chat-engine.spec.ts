@@ -279,4 +279,26 @@ describe("ChatEngine", () => {
       expect(r.route).toBe("error");
     });
   });
+
+  it("이미 abort된 signal: Judge를 호출하지 않고 error로 끝나며 unhandled rejection이 없다", async () => {
+    const seen: unknown[] = [];
+    const l = (e: unknown) => seen.push(e);
+    process.on("unhandledRejection", l);
+    try {
+      const judge = new FakeJudge(
+        () => Promise.reject(new Error("turn boom")),
+        () => Promise.reject(new Error("rel boom")),
+      );
+      const ctrl = new AbortController();
+      ctrl.abort();
+      const r = await engine(judge).handle(input("법인카드 회식비", ctrl.signal));
+      await new Promise((res) => setTimeout(res, 20));
+      expect(r.route).toBe("error");
+      expect(judge.turnCalls).toHaveLength(0);
+      expect(judge.relevanceCalls).toHaveLength(0);
+      expect(seen).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", l);
+    }
+  });
 });

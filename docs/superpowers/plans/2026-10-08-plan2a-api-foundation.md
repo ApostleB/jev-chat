@@ -158,7 +158,7 @@ const FORBIDDEN: { pattern: RegExp; reason: string }[] = [
 자체 테스트: 아래 문자열 각각이 하나 이상의 패턴에 걸려야 하고, 정상 import(`from "zod"`, `from "../domain/types"`)는 걸리지 않아야 한다.
 `import x from "@nestjs/common"`, `export { y } from "@prisma/client"`, `const m = await import("socket.io")`, `require("@typesafe-ai/sdk")`, `import "prisma/config"`, `process["env"].X`, `process.env.X`.
 
-- [ ] **0-7: 이미 취소된 신호의 미처리 rejection 제거 (Codex 계획 1 최종 리뷰 L1, Major)**
+- [x] **0-7: 이미 취소된 신호의 미처리 rejection 제거 (Codex 계획 1 최종 리뷰 L1, Major)**
 
 실패 테스트:
 - `abort.spec.ts`(신규): 이미 abort된 signal로 `raceWithAbort(Promise.reject(new Error("x")), signal, () => "cancelled")` → `"cancelled"`를 반환하고, `process.on("unhandledRejection")` 리스너가 테스트 동안 한 번도 호출되지 않는다(테스트 끝에 `await new Promise((r) => setTimeout(r, 10))` 후 확인, 리스너는 afterEach에서 제거).

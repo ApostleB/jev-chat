@@ -1,6 +1,9 @@
 /** signal이 abort되면 onAbort() 값으로 즉시 끝낸다. 원래 promise의 늦은 결과는 버린다. */
 export function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbort: () => T): Promise<T> {
-  if (signal.aborted) return Promise.resolve(onAbort());
+  if (signal.aborted) {
+    promise.catch(() => undefined); // 버려지는 원 Promise의 rejection을 관찰한다
+    return Promise.resolve(onAbort());
+  }
   return new Promise<T>((resolve, reject) => {
     const listener = () => resolve(onAbort());
     signal.addEventListener("abort", listener, { once: true });
