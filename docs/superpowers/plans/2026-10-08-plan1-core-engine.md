@@ -1202,7 +1202,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `parseRelevanceAnswer(answers: unknown): number`
   - `class JevResponseError extends Error`
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/core/judge/templates.spec.ts`:
 ```ts
@@ -1383,12 +1383,12 @@ describe("parseRelevanceAnswer", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- judge`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 3: 포트 작성**
+- [x] **Step 3: 포트 작성**
 
 `jev-chat-api/src/core/judge/ports.ts`:
 ```ts
@@ -1447,7 +1447,7 @@ export interface Judge {
 }
 ```
 
-- [ ] **Step 4: 템플릿 작성**
+- [x] **Step 4: 템플릿 작성**
 
 `jev-chat-api/src/core/judge/templates.ts`:
 ```ts
@@ -1582,7 +1582,7 @@ export function buildRelevanceRequest(req: RelevanceRequest): JevRequest | null 
 }
 ```
 
-- [ ] **Step 5: 파서 작성**
+- [x] **Step 5: 파서 작성**
 
 `jev-chat-api/src/core/judge/parse.ts`:
 ```ts
@@ -1643,12 +1643,12 @@ export function parseRelevanceAnswer(answers: unknown): number {
 }
 ```
 
-- [ ] **Step 6: 실행 → 통과 확인**
+- [x] **Step 6: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck`
 Expected: PASS, 타입 오류 없음
 
-- [ ] **Step 7: 커밋**
+- [x] **Step 7: 커밋**
 
 ```bash
 git add jev-chat-api
