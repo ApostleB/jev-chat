@@ -181,7 +181,7 @@ export function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbo
 실패 테스트(`extractive.spec.ts`): `clarify(ambiguous)` + showHelpdesk → 마지막 줄이 헬프데스크, `clarify(scope)` + showHelpdesk도 동일, showHelpdesk=false면 문구만. `chat-engine.spec.ts`: `error 0.4 + account_access 0.3 + regulation 0.3`, ambiguity 0.8 → route clarify, 텍스트 끝이 헬프데스크.
 구현: `ExtractiveAnswerer`의 clarify 분기를 즉시 반환하지 않고 `body = [문구]`로 두어 공통 후처리(`if (helpdeskRequired || input.showHelpdesk)`)를 거치게 한다.
 
-- [ ] **0-9: 크기·취소 경계 테스트 보강 (L3)**
+- [x] **0-9: 크기·취소 경계 테스트 보강 (L3)**
 
 - `templates.spec.ts`: 질문이 여러 개인 64k 독립 fixture — state+최장 질문은 32k 이하로 유지하면서 전체 합만 64,000 / 64,001이 되도록 만들어 통과/초과를 각각 확인.
 - `chat-engine.spec.ts`: (a) B 하나만 기한 초과(나머지는 완료) → 완료된 B의 `usage`가 jevCalls에 보존되고 bStatus `partial`, (b) A 완료 직후 abort → 결정은 A 기준으로 정상 진행. 합성 audit(`attempts: 0`)은 "미완료·미측정" 의미임을 `ports.ts` 주석에 명시.

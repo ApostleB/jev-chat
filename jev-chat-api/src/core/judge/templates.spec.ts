@@ -7,6 +7,8 @@ import {
   estimateTokens,
   JEV_MODEL,
   TOKEN_LIMITS,
+  type JevRequest,
+  type JevQuestion,
 } from "./templates";
 import { chunkFixture, faqFixture } from "../testing/fixtures";
 
@@ -163,6 +165,29 @@ describe("크기 검사", () => {
     expect(atLimit).not.toBeNull();
     expect(Math.ceil(JSON.stringify(atLimit!.state).length / 3) + questionTokens).toBe(32000);
     expect(over).toBeNull();
+  });
+  it("질문이 여러 개일 때 전체 합 64000은 통과, 64001은 거부 (state+최장 질문은 32000 이하, 독립 계산 fixture)", () => {
+    // 전부 ASCII라 토큰 = ceil(JSON 길이 / 3). 각 구성요소의 JSON 길이를 3의 배수로 맞춰 합이 정확히 64000이 되게 한다.
+    const question = (len: number): JevQuestion => {
+      const base = JSON.stringify({ type: "choice", instructions: "", criteria: {} }).length;
+      return { type: "choice", instructions: "a".repeat(len - base), criteria: {} };
+    };
+    const stateOf = (len: number) => {
+      const base = JSON.stringify({ s: "" }).length;
+      return { s: "a".repeat(len - base) };
+    };
+    const make = (stateLen: number): JevRequest => ({
+      model: "m",
+      state: stateOf(stateLen),
+      questions: { q1: question(63000), q2: question(63000), q3: question(63000) },
+    });
+    // state 3000자(1000토큰) + 질문 3개 × 63000자(21000토큰) = 64000, state+최장 질문 = 22000
+    const atLimit = make(3000);
+    const over = make(3001); // state가 1001토큰 → 합 64001
+    expect(JSON.stringify(atLimit.state).length).toBe(3000);
+    expect(JSON.stringify(atLimit.questions.q1).length).toBe(63000);
+    expect(checkRequestSize(atLimit)).toEqual({ total: 64000, stateAndLongest: 22000, ok: true });
+    expect(checkRequestSize(over)).toEqual({ total: 64001, stateAndLongest: 22001, ok: false });
   });
   it("메시지 자체가 한도를 넘으면 null", () => {
     const r = buildRelevanceRequest({ message: "가".repeat(40000), recentTurns: [], chunk: chunkFixture({ id: "c" }) });

@@ -312,4 +312,32 @@ describe("ChatEngine", () => {
     expect(r.text.startsWith(MESSAGES.clarifyAmbiguous)).toBe(true);
     expect(r.text.endsWith(MESSAGES.helpdesk(snapshot.helpdesk))).toBe(true);
   });
+
+  it("B 하나만 기한 초과: 완료된 B의 usage가 jevCalls에 보존되고 bStatus=partial", async () => {
+    const judge = new FakeJudge(
+      async () => okTurn({ regulation: 1 }, { inputTokens: 100 }),
+      (req, signal) => (req.chunk.id === "card-1" ? Promise.resolve(okRelevance("card-1", 0.2, 50)) : hangUntilAbort(signal, () => okRelevance(req.chunk.id, 0))),
+    );
+    const r = await engine(judge).handle(input("법인카드 회식비", AbortSignal.timeout(30)));
+    expect(r.trace.bStatus).toBe("partial");
+    expect(r.trace.jevCalls.find((c) => c.chunkId === "card-1")).toMatchObject({ status: "ok", usage: { inputTokens: 50 } });
+    expect(r.trace.jevCalls.find((c) => c.chunkId === "card-2")).toMatchObject({ status: "aborted", attempts: 0 });
+    expect(r.trace.totalInputTokens).toBe(100 + 50);
+  });
+
+  it("A 완료 직후 abort되어도 결정은 A 기준으로 정상 진행(faq)", async () => {
+    const ctrl = new AbortController();
+    const judge = new FakeJudge(
+      async () => {
+        const out = okTurn({ regulation: 1 }, { faq: { choice: "faq-card", confidence: 0.9, probabilities: { "faq-card": 0.92, none: 0.08 } } });
+        // 엔진이 A 결과를 받은 직후에 abort되도록 마이크로태스크 두 단계 뒤로 미룬다
+        queueMicrotask(() => queueMicrotask(() => ctrl.abort()));
+        return out;
+      },
+      (req, signal) => hangUntilAbort(signal, () => okRelevance(req.chunk.id, 0)),
+    );
+    const r = await engine(judge).handle(input("법인카드 한도 얼마예요", ctrl.signal));
+    expect(r.route).toBe("faq");
+    expect(r.trace.jevCalls[0]).toMatchObject({ call: "turn", status: "ok", attempts: 1 });
+  });
 });

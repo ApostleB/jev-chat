@@ -38,6 +38,10 @@ export interface JevCallCause {
   status?: number;
 }
 
+/**
+ * 호출 1건의 감사 기록. 엔진이 만드는 합성 audit(`attempts: 0`)은 "미완료·미측정"을 뜻한다
+ * (기한 초과·취소로 결과를 받지 못했거나 시작조차 하지 않은 호출). 실제 시도 횟수·지연이 아니다.
+ */
 export interface JevCallAudit {
   call: "turn" | "relevance";
   chunkId?: string;
