@@ -65,4 +65,14 @@ describe("ExtractiveAnswerer", () => {
   it("blocked·error에는 showHelpdesk여도 헬프데스크를 붙이지 않는다", async () => {
     expect((await run({ route: "error", reason: "turn_failed" }, true)).text).toBe(MESSAGES.error);
   });
+
+  it("clarify: showHelpdesk면 문구 뒤에 헬프데스크 안내(ambiguous·scope 모두)", async () => {
+    const line = MESSAGES.helpdesk(helpdesk);
+    expect((await run({ route: "clarify", reason: "ambiguous" }, true)).text).toBe(`${MESSAGES.clarifyAmbiguous}\n\n${line}`);
+    expect((await run({ route: "clarify", reason: "scope" }, true)).text).toBe(`${MESSAGES.clarifyScope}\n\n${line}`);
+  });
+  it("blocked/error는 showHelpdesk여도 헬프데스크를 붙이지 않는다", async () => {
+    expect((await run({ route: "blocked", variant: "out_of_scope" }, true)).text).toBe(MESSAGES.outOfScope);
+    expect((await run({ route: "error", reason: "turn_failed" }, true)).text).toBe(MESSAGES.error);
+  });
 });

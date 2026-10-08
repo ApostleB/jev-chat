@@ -175,7 +175,7 @@ export function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbo
 ```
 `chat-engine.ts`: 문맥 로딩 직후와 Judge 호출 직전에 `if (signal.aborted)`이면 Judge를 호출하지 않고 A 미완료(null)·B 미시작 상태로 결정 단계로 넘어간다(0-5의 원인 구분 audit 사용).
 
-- [ ] **0-8: clarify에도 헬프데스크 후처리 (L2)**
+- [x] **0-8: clarify에도 헬프데스크 후처리 (L2)**
 
 설계 결정: `clarify`는 `showHelpdesk`면 헬프데스크 안내를 붙인다(모호하거나 범위가 애매해도 오류·계정 문제일 확률이 높으면 연락처가 필요). `blocked`·`error`는 붙이지 않는다(설계 1장 부가 규칙에 명시 — 오케스트레이터가 반영).
 실패 테스트(`extractive.spec.ts`): `clarify(ambiguous)` + showHelpdesk → 마지막 줄이 헬프데스크, `clarify(scope)` + showHelpdesk도 동일, showHelpdesk=false면 문구만. `chat-engine.spec.ts`: `error 0.4 + account_access 0.3 + regulation 0.3`, ambiguity 0.8 → route clarify, 텍스트 끝이 헬프데스크.

@@ -46,7 +46,8 @@ export class ExtractiveAnswerer implements Answerer {
       case "blocked":
         return { text: decision.variant === "smalltalk" ? MESSAGES.smalltalk : MESSAGES.outOfScope, sources: [] };
       case "clarify":
-        return { text: decision.reason === "scope" ? MESSAGES.clarifyScope : MESSAGES.clarifyAmbiguous, sources: [] };
+        body = [decision.reason === "scope" ? MESSAGES.clarifyScope : MESSAGES.clarifyAmbiguous];
+        break;
       case "fallback":
         body = [MESSAGES.fallback];
         helpdeskRequired = true;

@@ -301,4 +301,15 @@ describe("ChatEngine", () => {
       process.off("unhandledRejection", l);
     }
   });
+
+  it("clarify + 헬프데스크 확률 높음: 텍스트 끝이 헬프데스크", async () => {
+    const judge = new FakeJudge(
+      async () => okTurn({ error: 0.4, account_access: 0.3, regulation: 0.3 }, { ambiguity: 0.8 }),
+      async (req) => okRelevance(req.chunk.id, 0.9),
+    );
+    const r = await engine(judge).handle(input("법인카드 안돼요"));
+    expect(r.route).toBe("clarify");
+    expect(r.text.startsWith(MESSAGES.clarifyAmbiguous)).toBe(true);
+    expect(r.text.endsWith(MESSAGES.helpdesk(snapshot.helpdesk))).toBe(true);
+  });
 });
