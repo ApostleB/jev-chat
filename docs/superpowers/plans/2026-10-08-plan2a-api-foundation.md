@@ -1384,7 +1384,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 > **사전 조건(사람):** Docker Desktop을 실행하거나, 로컬 MariaDB 11.x에 `jev_chat`, `jev_chat_test` database와 권한 있는 계정을 준비한다. 오케스트레이터가 사용자에게 요청한다. 준비되지 않으면 Step 5~7의 DB 단계에서 멈추고 보고한다.
 
-- [ ] **Step 1: 개발용 MariaDB 구성(선택 사항, Docker)**
+- [x] **Step 1: 개발용 MariaDB 구성(선택 사항, Docker)**
 
 `infra/docker-compose.yml`:
 ```yaml
@@ -1419,7 +1419,7 @@ GRANT CREATE, DROP ON *.* TO 'jev'@'%';
 FLUSH PRIVILEGES;
 ```
 
-- [ ] **Step 2: Prisma 설정과 스키마 작성**
+- [x] **Step 2: Prisma 설정과 스키마 작성**
 
 `jev-chat-api/prisma.config.ts`:
 ```ts
@@ -1626,14 +1626,14 @@ model MessageReview {
 ```
 ※ 설계 3장의 trace 상세 필드(intent_probs, context, retrieval, candidates, jev_calls, latency_ms, policy)는 core `TraceRecord` 전체를 `data` JSON 하나로 저장하고, 조회·필터에 쓰는 값만 컬럼으로 뺀다(설계 대비 저장 형식 단순화, 정보 손실 없음).
 
-- [ ] **Step 3: 스키마 검증과 클라이언트 생성 확인** [P6]
+- [x] **Step 3: 스키마 검증과 클라이언트 생성 확인** [P6]
 
 Run: `pnpm --filter jev-chat-api prisma validate && pnpm --filter jev-chat-api db:generate`
 Expected: 오류 없음, `jev-chat-api/src/generated/prisma/client.ts` 등 생성.
 - 만약 `Faq.sourceChunk`(필수 `versionId` + 선택 `sourceChunkId`의 복합 관계)에서 Prisma 7.10이 "relation must be required" 류의 검증 오류를 내면: `sourceChunk` 관계와 `KnowledgeChunk.faqs` 역관계를 제거하고, 그 자리에 주석 `// 설계 예외: source_chunk_id 무결성은 loadDomainPack 검증 + KnowledgeRepository 적재 트랜잭션에서 보장`을 남긴 뒤 다시 validate한다. 어느 쪽을 택했는지 커밋 메시지와 체크포인트 보고에 적는다.
 - 마이그레이션 SQL(Step 6 이후)에서 `faqs`의 FK가 `ON DELETE RESTRICT`이고 `version_id`를 NULL로 만드는 동작(SET NULL)이 없는지 확인한다.
 
-- [ ] **Step 4: Prisma 클라이언트 팩토리와 테스트 헬퍼 작성**
+- [x] **Step 4: Prisma 클라이언트 팩토리와 테스트 헬퍼 작성**
 
 `jev-chat-api/src/adapters/persistence/prisma.ts`:
 ```ts
@@ -1709,7 +1709,7 @@ export default async function setup(): Promise<void> {
 }
 ```
 
-- [ ] **Step 5: 실패 테스트 작성(통합, DB 필요)**
+- [x] **Step 5: 실패 테스트 작성(통합, DB 필요)**
 
 `jev-chat-api/src/adapters/persistence/prisma.spec.ts`:
 ```ts

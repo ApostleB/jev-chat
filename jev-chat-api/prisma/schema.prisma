@@ -1,0 +1,178 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum KnowledgeVersionStatus {
+  active
+  archived
+  failed
+}
+
+enum ChunkKind {
+  regulation
+  how_to
+}
+
+enum TurnStatus {
+  processing
+  completed
+  failed
+}
+
+enum Verdict {
+  correct
+  wrong
+  partial
+}
+
+model KnowledgeVersion {
+  id           String                 @id @default(uuid()) @db.Char(36)
+  packName     String                 @map("pack_name") @db.VarChar(100)
+  packVersion  String                 @map("pack_version") @db.VarChar(50)
+  contentHash  String                 @map("content_hash") @db.Char(64)
+  status       KnowledgeVersionStatus
+  packSnapshot Json                   @map("pack_snapshot")
+  createdAt    DateTime               @default(now()) @map("created_at") @db.DateTime(3)
+  chunks       KnowledgeChunk[]
+  faqs         Faq[]
+
+  @@index([status, createdAt])
+  @@map("knowledge_versions")
+}
+
+/// [P7] 활성 지식 버전 포인터(단일 행 id=1). import는 이 행을 FOR UPDATE로 잠가 직렬화한다.
+model KnowledgeState {
+  id              Int     @id
+  activeVersionId String? @map("active_version_id") @db.Char(36)
+
+  @@map("knowledge_state")
+}
+
+model KnowledgeChunk {
+  versionId   String           @map("version_id") @db.Char(36)
+  id          String           @db.VarChar(100)
+  module      String           @db.VarChar(100)
+  kind        ChunkKind
+  title       String           @db.VarChar(200)
+  section     String           @db.VarChar(200)
+  text        String           @db.Text
+  tags        Json
+  updatedAt   String           @map("updated_at") @db.VarChar(10)
+  contentHash String           @map("content_hash") @db.Char(64)
+  version     KnowledgeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  faqs        Faq[]
+
+  @@id([versionId, id])
+  @@map("knowledge_chunks")
+}
+
+model Faq {
+  versionId     String           @map("version_id") @db.Char(36)
+  id            String           @db.VarChar(100)
+  intent        String           @db.VarChar(30)
+  summary       String           @db.VarChar(500)
+  appliesWhen   String           @map("applies_when") @db.Text
+  answer        String           @db.Text
+  sourceChunkId String?          @map("source_chunk_id") @db.VarChar(100)
+  version       KnowledgeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  sourceChunk   KnowledgeChunk?  @relation(fields: [versionId, sourceChunkId], references: [versionId, id], onDelete: Restrict, onUpdate: Restrict)
+  variants      FaqVariant[]
+
+  @@id([versionId, id])
+  @@map("faqs")
+}
+
+model FaqVariant {
+  id        Int    @id @default(autoincrement())
+  versionId String @map("version_id") @db.Char(36)
+  faqId     String @map("faq_id") @db.VarChar(100)
+  text      String @db.VarChar(1000)
+  faq       Faq    @relation(fields: [versionId, faqId], references: [versionId, id], onDelete: Cascade)
+
+  @@index([versionId, faqId])
+  @@map("faq_variants")
+}
+
+model ChatSession {
+  id           String     @id @db.Char(36)
+  userId       String     @map("user_id") @db.VarChar(100)
+  channel      String     @db.VarChar(50)
+  nextTurnSeq  Int        @default(1) @map("next_turn_seq")
+  createdAt    DateTime   @default(now()) @map("created_at") @db.DateTime(3)
+  lastActiveAt DateTime   @default(now()) @map("last_active_at") @db.DateTime(3)
+  turns        ChatTurn[]
+
+  @@index([userId, lastActiveAt])
+  @@map("chat_sessions")
+}
+
+model ChatTurn {
+  id             String        @id @default(uuid()) @db.Char(36)
+  sessionId      String        @map("session_id") @db.Char(36)
+  turnSeq        Int           @map("turn_seq")
+  clientMsgId    String        @map("client_msg_id") @db.Char(36)
+  userText       String        @map("user_text") @db.Text
+  retryOfTurnSeq Int?          @map("retry_of_turn_seq")
+  status         TurnStatus
+  errorCode      String?       @map("error_code") @db.VarChar(40)
+  errorRetryable Boolean?      @map("error_retryable")
+  assistantText  String?       @map("assistant_text") @db.Text
+  route          String?       @db.VarChar(20)
+  sources        Json?
+  createdAt      DateTime      @default(now()) @map("created_at") @db.DateTime(3)
+  completedAt    DateTime?     @map("completed_at") @db.DateTime(3)
+  session        ChatSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  trace          MessageTrace?
+
+  @@unique([sessionId, turnSeq])
+  @@unique([sessionId, clientMsgId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("chat_turns")
+}
+
+model MessageTrace {
+  id                 String          @id @default(uuid()) @db.Char(36)
+  turnId             String          @unique @map("turn_id") @db.Char(36)
+  knowledgeVersionId String          @map("knowledge_version_id") @db.Char(36)
+  templateVersion    String          @map("template_version") @db.VarChar(20)
+  modelVersion       String?         @map("model_version") @db.VarChar(40)
+  route              String          @db.VarChar(20)
+  intent             String?         @db.VarChar(30)
+  inScope            Float?          @map("in_scope")
+  ambiguity          Float?
+  faqChoice          String?         @map("faq_choice") @db.VarChar(100)
+  faqProb            Float?          @map("faq_prob")
+  faqConfidence      Float?          @map("faq_confidence")
+  bStatus            String          @map("b_status") @db.VarChar(20)
+  totalInputTokens   Int             @map("total_input_tokens")
+  errorCode          String?         @map("error_code") @db.VarChar(40)
+  data               Json
+  createdAt          DateTime        @default(now()) @map("created_at") @db.DateTime(3)
+  turn               ChatTurn        @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  reviews            MessageReview[]
+
+  @@index([route, createdAt])
+  @@map("message_traces")
+}
+
+model MessageReview {
+  id               String       @id @default(uuid()) @db.Char(36)
+  traceId          String       @map("trace_id") @db.Char(36)
+  verdict          Verdict
+  expectedIntent   String?      @map("expected_intent") @db.VarChar(30)
+  expectedFaqId    String?      @map("expected_faq_id") @db.VarChar(100)
+  expectedChunkIds Json?        @map("expected_chunk_ids")
+  note             String?      @db.Text
+  reviewerId       String       @map("reviewer_id") @db.VarChar(100)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.DateTime(3)
+  trace            MessageTrace @relation(fields: [traceId], references: [id], onDelete: Cascade)
+
+  @@map("message_reviews")
+}
