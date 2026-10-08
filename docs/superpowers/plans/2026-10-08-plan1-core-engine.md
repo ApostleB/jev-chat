@@ -2670,7 +2670,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `jev-chat-api/src/core/index.ts` — 계획 2가 사용하는 core 공개 API 재수출 (아래 코드의 목록 그대로)
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/core/boundary.spec.ts`:
 ```ts
@@ -2776,12 +2776,12 @@ describe("core 단독 실행", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- standalone boundary`
 Expected: standalone FAIL — `Cannot find module './index'` (boundary는 PASS일 수 있음)
 
-- [ ] **Step 3: core 공개 API 작성**
+- [x] **Step 3: core 공개 API 작성**
 
 `jev-chat-api/src/core/index.ts`:
 ```ts
@@ -2837,17 +2837,17 @@ export {
 } from "./engine/chat-engine";
 ```
 
-- [ ] **Step 4: 전체 실행 → 통과 확인**
+- [x] **Step 4: 전체 실행 → 통과 확인**
 
 Run: `pnpm test && pnpm typecheck` (루트)
 Expected: protocol + jev-chat-api 전체 PASS, 타입 오류 없음
 
-- [ ] **Step 5: 경계 검사가 실제로 잡는지 확인 (검증 후 원복)**
+- [x] **Step 5: 경계 검사가 실제로 잡는지 확인 (검증 후 원복)**
 
 Run: `echo 'export const x = process.env.FOO;' > jev-chat-api/src/core/tmp-violation.ts && pnpm --filter jev-chat-api test -- boundary; rm jev-chat-api/src/core/tmp-violation.ts`
 Expected: boundary 테스트 FAIL (`tmp-violation.ts: process.env`), 파일 삭제 후 다시 PASS
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add jev-chat-api
