@@ -159,7 +159,7 @@ chat:send → 인증·권한·zod 검증
 - 같은 API 키를 쓰는 **모든 Jev 호출**이 하나의 제한기를 통과: 동시 실행 ≤ 40, 초당 요청 ≤ 70, 초당 토큰 ≤ 80k(추정치 기준). 모두 설정값.
 - 제한기 대기 최대 3s. 엔진 기한 8s를 넘길 수 없다.
 - 재시도는 **제한기 계층 한 곳에서만**: 429/529/5xx/timeout에 1회, `retry-after` 존중, 재시도도 예산에 포함. SDK 자체 재시도는 끈다.
-- 요청 전 크기 검사: state+전체 질문 ≤ 64k, state+최장 질문 ≤ 32k(한국어는 보수적으로 추정). 초과 시 recent_turns → 후보 순으로 축소.
+- 요청 전 크기 검사: state+전체 질문 ≤ 64k, state+최장 질문 ≤ 32k(보수적 추정: ASCII 3자=1, 한글 1자=1.5, 기타 1자=2토큰). **recent_turns는 절대 축소하지 않는다**(A·B 문맥 일치). 초과 시 A는 FAQ 후보만 줄이고, 그래도 넘거나 B가 넘으면 해당 호출은 `too_large` 실패. 청크·FAQ 길이 상한은 import에서 강제(청크 4000자, FAQ 답 2000자).
 - 목표: p95 응답 ≤ 4s(동시 사용자 10명 기준), 별도 측정. 추정 토큰 대비 실제 usage 오차를 기록.
 
 ## 2. Jev 질문 설계
@@ -287,7 +287,7 @@ type ErrorCode = "UNAUTHORIZED" | "FORBIDDEN" | "PROTOCOL_UNSUPPORTED" | "INVALI
 | C→S | `session:start` | `{ sessionId?, beforeTurnSeq? }` | `Ack<{ sessionId, turns: Turn[] (최신 50개, turn_seq 오름차순), hasMore, nextBeforeTurnSeq? }>` |
 | C→S | `chat:send` | `{ sessionId, clientMsgId(uuid), text, retryOfTurnSeq? }` | `Ack<{ turnId, turnSeq, status: "accepted" \| "duplicate" }>` |
 | S→C | `chat:status` | `{ sessionId, clientMsgId, turnSeq, stage: queued\|judging\|answering }` | 진행 표시 |
-| S→C | `chat:done` | `{ sessionId, clientMsgId, turnSeq, turnId, text, route, sources[], traceId }` | 최종 답변 (route=error 포함) |
+| S→C | `chat:done` | `{ sessionId, clientMsgId, turnSeq, turnId, text, route, sources[], traceId, error? }` | 최종 답변. `route=error`이면 `error: { code, retryable }` 필수, 그 외에는 없음 |
 | S→C | `chat:error` | `{ sessionId, clientMsgId, turnSeq, code, message, retryable }` | 턴 실패 (failed) |
 | S→C | `chat:trace` | `{ traceId, trace }` | debug 권한 소켓에만 |
 

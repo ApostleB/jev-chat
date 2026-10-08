@@ -8,12 +8,13 @@
 
 **Tech Stack:** Node 22, pnpm 11, TypeScript ~6.0.2, Vitest ^5, zod ^4.6, tsup ^8.5
 
-**설계 문서:** `docs/superpowers/specs/2026-10-08-jev-chat-design.md` (v3 확정). 이 계획은 설계 1·2장, 0장의 core 경계 계약, 6장의 단위 테스트 계층을 구현한다.
+**설계 문서:** `docs/superpowers/specs/2026-10-08-jev-chat-design.md` (v3 확정).
+**체크포인트 1 이후:** Task 5 전에 `docs/superpowers/plans/2026-10-08-plan1-checkpoint1-fixes.md`(F1~F7)를 먼저 처리한다. 그 문서의 결정이 이 계획과 충돌하면 그 문서가 우선한다(`CompletedTurn.sources`, 문맥 비축소, Choice 엄격 검증 등). 이 계획은 설계 1·2장, 0장의 core 경계 계약, 6장의 단위 테스트 계층을 구현한다.
 
 ## Global Constraints
 
 - 모든 응답·주석·커밋 메시지는 한국어. 커밋 메시지 끝에 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- `jev-chat-api/src/core/**`는 `@nestjs/*`, `@prisma/*`, `prisma`, `socket.io`, `@typesafe-ai/*`, `process.env`를 import/참조하지 않는다 (Task 9 테스트로 강제).
+- `jev-chat-api/src/core/**`는 `@nestjs/*`, `@prisma/*`, `prisma`, `socket.io`, `@typesafe-ai/*`, `process.env`를 import/참조하지 않는다 (Task 8 테스트로 강제).
 - `.env*` 파일(`.env.example` 제외)을 읽거나 출력하지 않는다.
 - Jev 모델은 `jev-1.13.0` 고정. 질문 템플릿 버전은 코드 상수 `TEMPLATE_VERSION = "v1"`이 기준.
 - 경로 결정 임계값 기본값: in_scope block 0.4 / clarify 0.6, ambiguous 0.7, faq 0.8, relevance reference 0.5 / answer 0.8, helpdesk 0.5. 후보 수 FAQ 5 / 문서 8. 기한 엔진 8000ms·큐 10000ms·제한기 3000ms·저장 3000ms. 경계값은 `>=` 기준.
@@ -2373,7 +2374,7 @@ describe("ChatEngine", () => {
   });
 
   it("문맥: 이전 완료 턴을 Judge 요청에 같은 recentTurns로 전달", async () => {
-    const turns = new InMemoryContextReader([{ turnSeq: 1, userText: "법인카드 한도?", assistantText: "1회 50만 원", sourceTitles: ["법인카드 규정"] }]);
+    const turns = new InMemoryContextReader([{ turnSeq: 1, userText: "법인카드 한도?", assistantText: "1회 50만 원", sources: [{ title: "법인카드 규정", section: "제3조 사용 한도" }] }]);
     const judge = new FakeJudge(async () => okTurn({ regulation: 1 }), async (req) => okRelevance(req.chunk.id, 0.1));
     const r = await engine(judge, turns).handle(input("그럼 회식비는요?", new AbortController().signal, 2));
     expect(judge.turnCalls[0]?.recentTurns).toEqual([
