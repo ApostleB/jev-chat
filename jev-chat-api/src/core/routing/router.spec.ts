@@ -30,6 +30,17 @@ describe("inScopeProbability / needsHelpdesk", () => {
   });
 });
 
+describe("부동소수점 경계", () => {
+  it("in_scope 합이 0.4(0.39999999999999997)여도 block 임계에서 clarify(scope)", () => {
+    const r = decideFromTurn(P, turn({ regulation: 0.05, how_to: 0.3, error: 0.05, out_of_scope: 0.6 }), faqCands);
+    expect(r).toEqual({ route: "clarify", reason: "scope" });
+  });
+  it("helpdesk 합 0.1+0.2+0.2 = 0.5 경계는 헬프데스크", () => {
+    expect(needsHelpdesk(P, probs({ error: 0.1 + 0.2, account_access: 0.2 }))).toBe(true);
+    expect(needsHelpdesk(P, probs({ error: 0.1 + 0.2, account_access: 0.19 }))).toBe(false);
+  });
+});
+
 describe("decideFromTurn (규칙 1~5)", () => {
   it("1: A 실패면 error", () => {
     const failed: JudgeOutcome<TurnJudgment> = { ok: false, errorKind: "provider", message: "529", audit: { ...audit, status: "failed" } };

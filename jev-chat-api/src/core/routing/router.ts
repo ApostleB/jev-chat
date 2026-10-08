@@ -18,12 +18,15 @@ export type RouteDecision =
   | { route: "reference"; chunk: Chunk }
   | { route: "fallback" };
 
+/** 확률 합의 부동소수점 오차 제거(소수 9자리 반올림) */
+const round9 = (x: number) => Math.round(x * 1e9) / 1e9;
+
 export function inScopeProbability(probs: Record<IntentId, number>): number {
-  return ERP_INTENTS.reduce((sum, id) => sum + (probs[id] ?? 0), 0);
+  return round9(ERP_INTENTS.reduce((sum, id) => sum + (probs[id] ?? 0), 0));
 }
 
 export function needsHelpdesk(policy: Policy, probs: Record<IntentId, number>): boolean {
-  return (probs.error ?? 0) + (probs.account_access ?? 0) >= policy.helpdesk;
+  return round9((probs.error ?? 0) + (probs.account_access ?? 0)) >= policy.helpdesk;
 }
 
 /** 규칙 1~5. 종료가 결정되면 RouteDecision, B 결과가 필요하면 null. */

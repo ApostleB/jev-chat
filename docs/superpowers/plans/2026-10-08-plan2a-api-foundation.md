@@ -89,7 +89,7 @@ export interface JevCallCause {
 ```
 `JevCallAudit`에 `cause?: JevCallCause;` 추가. `core/index.ts`의 judge/ports 재수출에 `JevCallCause` 추가. (타입만 추가 — typecheck로 확인)
 
-- [ ] **0-2: in_scope 부동소수점 허용오차 (실제 재현 버그)**
+- [x] **0-2: in_scope 부동소수점 허용오차 (실제 재현 버그)**
 
 실패 테스트(`router.spec.ts`): `turn({ regulation: 0.05, how_to: 0.3, error: 0.05, out_of_scope: 0.6 })` → in_scope 0.4 → **clarify(scope)** 이어야 한다(현재 0.39999999999999997로 blocked).
 구현(`router.ts`):
