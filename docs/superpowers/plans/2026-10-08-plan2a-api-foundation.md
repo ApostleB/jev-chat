@@ -14,7 +14,7 @@
 ## Global Constraints
 
 - 계획 1의 Global Constraints를 모두 따른다(한국어, 커밋 trailer, core 경계, `.env*` 읽기 금지, push 금지).
-- **core(`src/core/**`)는 Task 0의 선행 수정 외에는 수정하지 않는다.** core 공개 API(`src/core/index.ts`)만 import한다. core에 버그가 있으면 멈추고 보고한다.
+- **core(`src/core/**`)는 Task 0의 선행 수정·강화 외에는 수정하지 않는다.** core 공개 API(`src/core/index.ts`)만 import한다. core에 버그가 있으면 멈추고 보고한다.
 - 이 계획은 Codex 사전 검토(`docs/reviews/2026-10-08-plan2a-plan-review-codex.md`, P1~P10)를 반영한 개정판이다. 각 반영 위치에 `[P#]`를 표시했다.
 - 버전 고정: `prisma` / `@prisma/client` / `@prisma/adapter-mariadb` = **정확히 7.10.0**(`latest`는 Prisma 8이라 사용 금지). Nest 코어 패키지 = 12.1.2. `@typesafe-ai/sdk` = 0.6.0. Prisma 문서는 `/docs/orm/v7/` 경로만 참고.
 - 모듈 형식: `jev-chat-api`는 CommonJS 유지(`package.json`에 `"type"` 없음, tsconfig `module: nodenext`). Prisma generator는 `moduleFormat = "cjs"`, 출력은 `src/generated/prisma`(git 제외).
@@ -64,15 +64,18 @@ jev-chat/
 
 ---
 
-### Task 0: core 선행 수정 — Jev 호출 실패 원인(cause) 기록 [P3]
+### Task 0: core 선행 수정·강화 — 실패 원인(cause) 기록 [P3] + 계획 1 최종 리뷰 반영
+
+> 계획 1 최종 리뷰(구현 터미널, 머지 가능·Critical 0)의 "곧 수정" 항목을 adapters 작성 전에 처리한다. 이 Task만 core 수정을 허용한다. 하위 항목별로 TDD + 커밋.
 
 **Files:**
-- Modify: `jev-chat-api/src/core/judge/ports.ts`
+- Modify: `jev-chat-api/src/core/judge/ports.ts`, `core/index.ts`, `core/routing/router.ts`, `core/domain/policy.ts`, `core/engine/abort.ts`, `core/engine/chat-engine.ts`, `core/boundary.spec.ts`
+- Test: 각 모듈의 `*.spec.ts`
 
 **Interfaces:**
-- Produces: `interface JevCallCause { source: "transport" | "limiter" | "response" | "size"; kind?: string; status?: number }`, `JevCallAudit.cause?: JevCallCause`
+- Produces: `interface JevCallCause { source: "transport" | "limiter" | "response" | "size"; kind?: string; status?: number }`, `JevCallAudit.cause?: JevCallCause`, `export type EngineDeps`(chat-engine), `ContextReader.loadCompletedTurns`는 시그니처 유지(엔진이 abort로 감쌈)
 
-- [ ] **Step 1: 타입 추가**
+- [ ] **0-1: JevCallCause 추가 [P3]**
 
 `ports.ts`의 `JevCallAudit` 위에 추가하고 필드를 하나 더한다:
 ```ts
@@ -84,17 +87,83 @@ export interface JevCallCause {
   status?: number;
 }
 ```
-`JevCallAudit`에 `cause?: JevCallCause;` 추가. `core/index.ts`의 judge/ports 재수출 목록에 `JevCallCause` 추가.
+`JevCallAudit`에 `cause?: JevCallCause;` 추가. `core/index.ts`의 judge/ports 재수출에 `JevCallCause` 추가. (타입만 추가 — typecheck로 확인)
 
-- [ ] **Step 2: 확인과 커밋**
+- [ ] **0-2: in_scope 부동소수점 허용오차 (실제 재현 버그)**
 
-Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` → 기존 테스트 전부 PASS
-```bash
-git add jev-chat-api/src/core/judge/ports.ts jev-chat-api/src/core/index.ts
-git commit -m "feat(core): JevCallAudit에 실패 원인(cause) 필드 추가 (계획 2A P3 선행)
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+실패 테스트(`router.spec.ts`): `turn({ regulation: 0.05, how_to: 0.3, error: 0.05, out_of_scope: 0.6 })` → in_scope 0.4 → **clarify(scope)** 이어야 한다(현재 0.39999999999999997로 blocked).
+구현(`router.ts`):
+```ts
+/** 확률 합의 부동소수점 오차 제거(소수 9자리 반올림) */
+const round9 = (x: number) => Math.round(x * 1e9) / 1e9;
+export function inScopeProbability(probs: Record<IntentId, number>): number {
+  return round9(ERP_INTENTS.reduce((sum, id) => sum + (probs[id] ?? 0), 0));
+}
+export function needsHelpdesk(policy: Policy, probs: Record<IntentId, number>): boolean {
+  return round9((probs.error ?? 0) + (probs.account_access ?? 0)) >= policy.helpdesk;
+}
 ```
+helpdesk도 같은 경계 테스트 추가(`error: 0.3, account_access: 0.2` 이외에 `0.1 + 0.2 + 0.2` 조합으로 0.5 경계).
+
+- [ ] **0-3: DEFAULT_POLICY 깊은 동결**
+
+실패 테스트(`policy.spec.ts` 신규): `expect(Object.isFrozen(DEFAULT_POLICY.deadlines)).toBe(true)` 및 대입 시 TypeError(strict mode).
+구현(`policy.ts`):
+```ts
+function deepFreeze<T>(o: T): Readonly<T> {
+  for (const v of Object.values(o as object)) if (v && typeof v === "object") deepFreeze(v);
+  return Object.freeze(o);
+}
+export const DEFAULT_POLICY: Policy = deepFreeze({ /* 기존 값 그대로 */ });
+```
+(스냅샷 서비스는 팩의 policy 객체를 새로 만들므로 영향 없음.)
+
+- [ ] **0-4: linkedController → AbortSignal.any (리스너 누수 제거)**
+
+`abort.ts`의 `linkedController`를 다음으로 바꾼다:
+```ts
+/** 부모가 abort되면 함께 abort되는 자식. AbortSignal.any는 GC 친화적이라 수명이 긴 부모에서도 리스너가 쌓이지 않는다. */
+export function linkedController(parent: AbortSignal): { signal: AbortSignal; abort: (reason?: unknown) => void } {
+  const own = new AbortController();
+  return { signal: AbortSignal.any([parent, own.signal]), abort: (reason?: unknown) => own.abort(reason) };
+}
+```
+엔진의 `bController.abort()`/`bController.signal` 사용은 그대로 동작해야 한다. 테스트: 부모 abort → 자식 abort, 자식 abort → 부모는 그대로, 같은 부모로 1000번 만들어도 부모 abort 시 모두 abort.
+
+- [ ] **0-5: 기한 초과와 다른 abort 구분 + 문맥 로딩도 기한 안에서**
+
+`chat-engine.ts`:
+- A가 끝나기 전 signal이 abort된 경우의 합성 audit: `errorKind`를 `signal.reason`이 `TimeoutError`(`(signal.reason as Error)?.name === "TimeoutError"`)면 `"timeout"`, 아니면 `"aborted"`로 기록하고 `status`는 각각 `"failed"` / `"aborted"`.
+- `contextReader.loadCompletedTurns(...)`를 `raceWithAbort(..., signal, () => [])`로 감싸 DB가 멈춰도 엔진 기한을 넘기지 않게 한다(abort되면 빈 문맥으로 진행하고, 이어지는 A 호출이 즉시 abort되어 error 경로로 끝난다).
+- `EngineDeps`를 `export type`으로 공개하고 `core/index.ts`에 재수출.
+테스트(`chat-engine.spec.ts`):
+  - `AbortSignal.timeout(5)`로 A 미완료 → `jevCalls[0]`이 `{ status: "failed", errorKind: "timeout" }`.
+  - 일반 `AbortController.abort()` → `{ status: "aborted", errorKind: "aborted" }`.
+  - **A 성공 후 B 대기 중 기한 초과**: A는 즉시 FAQ 미확정 성공, B는 abort까지 대기 → 기한 후 `bStatus` = `failed`(전부 미완료) → route `error`(relevance_failed), 응답 시간이 기한 + 여유(100ms) 이내.
+  - 멈춘 ContextReader(영원히 pending) + `AbortSignal.timeout(20)` → 엔진이 100ms 안에 `error`로 끝난다.
+
+- [ ] **0-6: 경계 검사 정규식 보강**
+
+`boundary.spec.ts`의 `FORBIDDEN`을 다음으로 교체하고, 위반 탐지 자체 테스트를 추가한다:
+```ts
+const MODULES = String.raw`(@nestjs\/|@prisma\/|prisma["'\/]|socket\.io|@typesafe-ai\/)`;
+const FORBIDDEN: { pattern: RegExp; reason: string }[] = [
+  { pattern: new RegExp(String.raw`\bfrom\s*["']${MODULES}`), reason: "정적 import/export from" },
+  { pattern: new RegExp(String.raw`\bimport\s*\(\s*["']${MODULES}`), reason: "동적 import()" },
+  { pattern: new RegExp(String.raw`\brequire\s*\(\s*["']${MODULES}`), reason: "require()" },
+  { pattern: new RegExp(String.raw`\bimport\s*["']${MODULES}`), reason: "부수효과 import" },
+  { pattern: /\bprocess\s*(\.|\[\s*["'])\s*env\b/, reason: "process.env" },
+];
+```
+자체 테스트: 아래 문자열 각각이 하나 이상의 패턴에 걸려야 하고, 정상 import(`from "zod"`, `from "../domain/types"`)는 걸리지 않아야 한다.
+`import x from "@nestjs/common"`, `export { y } from "@prisma/client"`, `const m = await import("socket.io")`, `require("@typesafe-ai/sdk")`, `import "prisma/config"`, `process["env"].X`, `process.env.X`.
+
+- [ ] **0-7: 확인과 커밋**
+
+Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` → 전부 PASS
+하위 항목별 커밋(예: `fix(core): in_scope 부동소수점 허용오차(계획1 최종리뷰)`), 0-1은 `feat(core): JevCallAudit에 실패 원인(cause) 추가 (계획 2A P3 선행)`.
+
+설계 문서 반영(오케스트레이터 담당): blocked 변형 판정은 코드 동작(`P(smalltalk) ≥ P(out_of_scope)`이면 인사 응답)을 기준으로 설계 문구를 맞춘다.
 
 ---
 

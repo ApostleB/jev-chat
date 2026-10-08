@@ -125,7 +125,7 @@ chat:send → 인증·권한·zod 검증
 | 순서 | 조건 | route | 사용자 응답 |
 |---|---|---|---|
 | 1 | 요청 A 실패(재시도 후) 또는 A 완료 전 엔진 기한 초과 | `error` | "잠시 후 다시 시도해주세요" (`JEV_UNAVAILABLE`, retryable) |
-| 2 | `in_scope < 0.4` | `blocked` | 고정 안내 (smalltalk이 최고 확률이면 인사 응답, 아니면 범위 밖 안내) |
+| 2 | `in_scope < 0.4` | `blocked` | 고정 안내 (`P(smalltalk) ≥ P(out_of_scope)`이면 인사 응답, 아니면 범위 밖 안내). 확률 합은 소수 9자리 반올림 후 비교 |
 | 3 | `0.4 ≤ in_scope < 0.6` | `clarify` | "HB-ERP 관련 질문인지 조금 더 자세히 알려주세요" |
 | 4 | `ambiguous ≥ 0.7` | `clarify` | "어떤 항목을 말씀하시는지 구체적으로 알려주세요" |
 | 5 | `faq ≠ none` 이고 `P(faq) ≥ 0.8` | `faq` | FAQ 답변 + 출처 |
