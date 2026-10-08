@@ -571,6 +571,8 @@ export type ReloadResponse = z.infer<typeof ReloadResponseSchema>;
 ```
 `packages/protocol/src/index.ts`에 `export * from "./rest";` 추가 후 `pnpm --filter @jev-chat/protocol build`.
 
+[계획 4 재확인 U3] `packages/protocol/src/events.ts`의 `ChatTraceEventSchema`에 `sessionId: UuidSchema`를 추가한다(늦게 도착한 이전 세션의 trace를 클라이언트가 구분하도록). `protocol.spec.ts`에 sessionId 누락 시 거부 테스트를 추가한다.
+
 `jev-chat-api/src/app/chat/turn-mapper.ts`:
 ```ts
 import { ErrorCodeSchema, type ChatDoneEvent, type ChatErrorEvent, type ErrorCode, type Route, type Turn } from "@jev-chat/protocol";
@@ -1296,7 +1298,7 @@ export class ChatService {
       };
       events.done(toDoneEvent(row, turn.sessionId));
       // [B8] trace는 항상 포트로 보낸다. 받는 소켓의 debug 권한은 Gateway가 거른다.
-      events.trace(turn.sessionId, { traceId: saved.traceId, trace: JSON.parse(JSON.stringify(result.trace)) });
+      events.trace(turn.sessionId, { sessionId: turn.sessionId, traceId: saved.traceId, trace: JSON.parse(JSON.stringify(result.trace)) });
     } finally {
       this.finish(turn, state);
     }
