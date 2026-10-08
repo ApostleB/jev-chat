@@ -1,0 +1,7 @@
+name: mini-test
+version: 0.0.1
+language: ko
+template_version: v1
+helpdesk:
+  phone: 02-000-0000
+  email: help@hanbit.example

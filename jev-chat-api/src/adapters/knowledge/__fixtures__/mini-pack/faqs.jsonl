@@ -1,0 +1,1 @@
+{"id":"faq-card-limit","intent":"regulation","summary":"법인카드 1회 사용 한도","applies_when":"법인카드 한 번 결제 한도를 묻는 경우. 회식비 1인당 기준은 해당하지 않음.","answer":"법인카드 1회 사용 한도는 50만 원입니다. 초과 결제는 사전 품의가 필요합니다.","source_chunk_id":"card-001","variants":["법인카드 한도 얼마예요?","카드 한 번에 얼마까지 써요"]}

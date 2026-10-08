@@ -1789,7 +1789,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `interface ActiveKnowledge { versionId: string; pack: Omit<DomainPack, "chunks" | "faqs" | "contentHash">; chunks: Chunk[]; faqs: Faq[] }`
   - `class KnowledgeRepository` — `constructor(prisma: PrismaClient)`, `importPack(pack: DomainPack): Promise<{ versionId: string; skipped: boolean }>` (knowledge_state 행 잠금으로 직렬화, 잠금 안에서 같은 contentHash면 skipped, 실패 시 전체 롤백), `loadActive(): Promise<ActiveKnowledge | null>` (knowledge_state 포인터 기준)
 
-- [ ] **Step 1: 테스트용 미니 팩 작성**
+- [x] **Step 1: 테스트용 미니 팩 작성**
 
 `jev-chat-api/src/adapters/knowledge/__fixtures__/mini-pack/manifest.yaml`:
 ```yaml
@@ -1841,7 +1841,7 @@ deadlines: { engine_ms: 8000, queue_ms: 10000, save_ms: 3000 }
 {"id":"faq-card-limit","intent":"regulation","summary":"법인카드 1회 사용 한도","applies_when":"법인카드 한 번 결제 한도를 묻는 경우. 회식비 1인당 기준은 해당하지 않음.","answer":"법인카드 1회 사용 한도는 50만 원입니다. 초과 결제는 사전 품의가 필요합니다.","source_chunk_id":"card-001","variants":["법인카드 한도 얼마예요?","카드 한 번에 얼마까지 써요"]}
 ```
 
-- [ ] **Step 2: 실패 테스트 작성**
+- [x] **Step 2: 실패 테스트 작성**
 
 `jev-chat-api/src/adapters/knowledge/pack-loader.spec.ts`:
 ```ts
@@ -2020,12 +2020,12 @@ describe.runIf(prisma)("KnowledgeRepository (통합)", () => {
 });
 ```
 
-- [ ] **Step 3: 실행 → 실패 확인**
+- [x] **Step 3: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- knowledge`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 4: 팩 스키마 작성**
+- [x] **Step 4: 팩 스키마 작성**
 
 `jev-chat-api/src/adapters/knowledge/pack-schema.ts`:
 ```ts
@@ -2088,7 +2088,7 @@ export const FaqLineSchema = z.object({
 });
 ```
 
-- [ ] **Step 5: 로더와 KnowledgeReader 작성**
+- [x] **Step 5: 로더와 KnowledgeReader 작성**
 
 `jev-chat-api/src/adapters/knowledge/pack-loader.ts`:
 ```ts
@@ -2243,7 +2243,7 @@ export class MapKnowledgeReader implements KnowledgeReader {
 }
 ```
 
-- [ ] **Step 6: 지식 저장소 작성**
+- [x] **Step 6: 지식 저장소 작성**
 
 `jev-chat-api/src/adapters/persistence/knowledge.repository.ts`:
 ```ts
@@ -2360,7 +2360,7 @@ export class KnowledgeRepository {
 }
 ```
 
-- [ ] **Step 7: import CLI 작성**
+- [x] **Step 7: import CLI 작성**
 
 `jev-chat-api/src/scripts/knowledge-import.ts`:
 ```ts
@@ -2410,7 +2410,7 @@ void main();
 Run: `pnpm --filter jev-chat-api test -- knowledge` (단위) 그리고 `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test -- knowledge.repository` (통합)
 Expected: 로더 7건 PASS, 저장소 통합 4건 PASS (URL 없으면 skip)
 
-- [ ] **Step 9: 커밋**
+- [x] **Step 9: 커밋**
 
 ```bash
 git add jev-chat-api/src/adapters/knowledge jev-chat-api/src/adapters/persistence/knowledge.repository* jev-chat-api/src/scripts
