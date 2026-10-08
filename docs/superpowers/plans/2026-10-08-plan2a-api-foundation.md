@@ -142,7 +142,7 @@ export function linkedController(parent: AbortSignal): { signal: AbortSignal; ab
   - **A 성공 후 B 대기 중 기한 초과**: A는 즉시 FAQ 미확정 성공, B는 abort까지 대기 → 기한 후 `bStatus` = `failed`(전부 미완료) → route `error`(relevance_failed), 응답 시간이 기한 + 여유(100ms) 이내.
   - 멈춘 ContextReader(영원히 pending) + `AbortSignal.timeout(20)` → 엔진이 100ms 안에 `error`로 끝난다.
 
-- [ ] **0-6: 경계 검사 정규식 보강**
+- [x] **0-6: 경계 검사 정규식 보강**
 
 `boundary.spec.ts`의 `FORBIDDEN`을 다음으로 교체하고, 위반 탐지 자체 테스트를 추가한다:
 ```ts
