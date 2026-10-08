@@ -74,8 +74,8 @@ interface ChatEngine {
   handle(input: HandleMessageInput, onProgress: (p: Progress) => void): Promise<EngineResult>;
 }
 // ports — 모두 AbortSignal을 받고, 실패는 타입이 있는 결과로 반환(throw는 프로그래밍 오류만)
-interface Judge      { judgeTurn(req, signal): Promise<JudgeOutcome<TurnJudgment>>; judgeRelevance(req, signal): AsyncIterable<RelevanceOutcome> }
-interface Retriever  { searchFaqs(q, k): FaqCandidate[]; searchChunks(q, k): ChunkCandidate[] }
+interface Judge      { judgeTurn(req, signal): Promise<JudgeOutcome<TurnJudgment>>; judgeRelevance(req /* 청크 1개 */, signal): Promise<JudgeOutcome<number>> }
+interface Retriever  { searchFaqs(q, k): FaqCandidate[]; searchChunks(queries /* q1, q2 */, k): ChunkCandidate[] }
 interface Answerer   { answer(input, signal): Promise<AnswerOutput> }   // MVP: Extractive만
 interface ContextReader { loadCompletedTurns(sessionId, beforeTurnSeq, n): Promise<Turn[]> }
 ```
