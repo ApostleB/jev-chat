@@ -152,7 +152,8 @@ export class ChatEngine {
       let decision: RouteDecision | null = decideFromTurn(policy, turnOutcome, faqCandidates);
       let settled: RelevanceSettled[] = [];
       let bStatus: BStatus;
-      const earlyDecided = decision !== null;
+      // A 실패(turn_failed)는 우리가 B를 취소한 사유가 아니라 외부 사정이므로, 그때는 입력 signal의 사유(기한 초과 여부)를 따른다
+      const earlyDecided = decision !== null && !(decision.route === "error" && decision.reason === "turn_failed");
       if (decision) {
         bController.abort();
         // 이미 끝난 B는 실제 결과로, 진행 중이던 B는 aborted로 trace에 남긴다
