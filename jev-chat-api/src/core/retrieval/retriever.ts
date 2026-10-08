@@ -62,14 +62,6 @@ export class Bm25Retriever implements Retriever {
         order.push(hit.id);
       });
     }
-    // 이후 리스트에서만 나온 matchedBy도 반영하기 위해 전체 리스트를 한 번 더 훑는다.
-    lists.forEach((list, qi) => {
-      for (const hit of list) {
-        const m = merged.get(hit.id);
-        const label = labels[qi]!;
-        if (m && !m.matchedBy.includes(label)) m.matchedBy.push(label);
-      }
-    });
     return order.slice(0, k).map((id, i) => {
       const m = merged.get(id)!;
       m.matchedBy.sort();

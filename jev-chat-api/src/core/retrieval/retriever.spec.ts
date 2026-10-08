@@ -22,6 +22,60 @@ describe("Bm25Retriever.searchFaqs", () => {
   });
 });
 
+describe("Bm25Retriever.searchFaqs 색인 필드", () => {
+  const r = new Bm25Retriever(
+    [
+      faqFixture({ id: "only-summary", summary: "zebra", variants: ["다른 표현"] }),
+      faqFixture({ id: "only-variant", summary: "다른 요약", variants: ["giraffe"] }),
+    ],
+    [],
+  );
+  it("summary에만 있는 단어로 검색된다", () => {
+    expect(r.searchFaqs("zebra", 5).map((h) => h.faq.id)).toEqual(["only-summary"]);
+  });
+  it("variants에만 있는 단어로 검색된다", () => {
+    expect(r.searchFaqs("giraffe", 5).map((h) => h.faq.id)).toEqual(["only-variant"]);
+  });
+  it("k=0이면 빈 배열", () => {
+    expect(r.searchFaqs("zebra", 0)).toEqual([]);
+  });
+});
+
+describe("Bm25Retriever.searchChunks 병합 순서 계약", () => {
+  // 모든 문서가 같은 길이(title·section 포함 6토큰)라 점수는 tf로만 갈린다.
+  //  q1="p" -> a,b,c가 동점(문서 순서) => [a,b,c]
+  //  q2="r" -> tf: a=3, d=2, b=1 => [a,d,b]
+  const mk = (id: string, text: string) => chunkFixture({ id, title: "t", section: "s", text });
+  const r = new Bm25Retriever([], [mk("a", "p r r r"), mk("b", "p r q q"), mk("c", "p q q q"), mk("d", "o r r q")]);
+
+  it("전제: 단독 질의 순서가 q1=[a,b,c], q2=[a,d,b]", () => {
+    expect(r.searchChunks(["p"], 8).map((h) => h.chunk.id)).toEqual(["a", "b", "c"]);
+    expect(r.searchChunks(["r"], 8).map((h) => h.chunk.id)).toEqual(["a", "d", "b"]);
+  });
+  it("순위 교차 병합 순서는 [a,b,d,c]이고 matchedBy를 합친다", () => {
+    const hits = r.searchChunks(["p", "r"], 8);
+    expect(hits.map((h) => h.chunk.id)).toEqual(["a", "b", "d", "c"]);
+    expect(hits.map((h) => h.matchedBy)).toEqual([["q1", "q2"], ["q1", "q2"], ["q2"], ["q1"]]);
+    expect(hits.map((h) => h.bm25Rank)).toEqual([1, 2, 3, 4]);
+  });
+  it("k=3으로 자르면 [a,b,d]", () => {
+    expect(r.searchChunks(["p", "r"], 3).map((h) => h.chunk.id)).toEqual(["a", "b", "d"]);
+  });
+  it("k=0이면 빈 배열", () => {
+    expect(r.searchChunks(["p", "r"], 0)).toEqual([]);
+  });
+});
+
+describe("Bm25Retriever NFC 정규화", () => {
+  it("분해형(NFD) 질의가 조합형 문서와 매칭된다", () => {
+    const r = new Bm25Retriever([], [chunkFixture({ id: "h", title: "t", section: "s", text: "한글 입력 방법" })]);
+    const decomposed = "한글".normalize("NFD");
+    expect(decomposed).not.toBe("한글");
+    expect([...decomposed].length).toBeGreaterThan(2); // 정말 자모로 분해되었는지
+    expect(r.searchChunks([decomposed], 5).map((h) => h.chunk.id)).toEqual(["h"]);
+  });
+});
+
 describe("Bm25Retriever.searchChunks", () => {
   const r = new Bm25Retriever(faqs, chunks);
   it("질의 하나면 그 결과를 그대로 쓴다", () => {
