@@ -37,6 +37,8 @@ export interface JevCallAudit {
   attempts: number;
   latencyMs: number;
   usage?: { inputTokens: number; outputTokens: number };
+  /** 요청 전 추정 입력 토큰(estimateTokens). 실제 usage와의 오차 비교용 */
+  estimatedInputTokens?: number;
   model?: string;
   /** 허용된 응답 필드만 (answers 객체). SDK 객체·헤더 금지 */
   answer?: unknown;

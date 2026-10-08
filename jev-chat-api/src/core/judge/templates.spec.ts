@@ -73,6 +73,17 @@ describe("buildRelevanceRequest", () => {
   });
 });
 
+describe("estimateTokens", () => {
+  it("ASCII 300자 = 100토큰", () => expect(estimateTokens("a".repeat(300))).toBe(100));
+  it("한글 1000자 = 1500토큰", () => expect(estimateTokens("가".repeat(1000))).toBe(1500));
+  it("한자 1000자 = 2000토큰", () => expect(estimateTokens("漢".repeat(1000))).toBe(2000));
+  it("이모지 1000자(코드포인트) = 2000토큰", () => expect(estimateTokens("😀".repeat(1000))).toBe(2000));
+  it("혼합 문자열은 계수별 합을 올림한다", () => {
+    // ASCII 4자(4/3) + 한글 2자(3) + 한자 1자(2) + 이모지 1자(2) = 8.33 → 9
+    expect(estimateTokens("abcd가나漢😀")).toBe(9);
+  });
+});
+
 describe("크기 검사", () => {
   it("한글은 영문보다 토큰을 크게 추정한다", () => {
     expect(estimateTokens("가".repeat(100))).toBeGreaterThan(estimateTokens("a".repeat(100)));

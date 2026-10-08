@@ -28,16 +28,18 @@ export const DEFAULT_INTENTS: IntentDef[] = [
 
 const HANGUL = /\p{Script=Hangul}/u;
 
-/** 보수적 토큰 추정: 한글 1자 = 1.5토큰, 그 외 3자 = 1토큰 */
+/** 보수적 토큰 추정: ASCII 3자 = 1토큰, 한글 1자 = 1.5토큰, 그 외(한자·이모지·기타) 1자 = 2토큰 */
 export function estimateTokens(value: unknown): number {
   const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
+  let ascii = 0;
   let hangul = 0;
   let other = 0;
   for (const ch of text) {
-    if (HANGUL.test(ch)) hangul++;
+    if (ch.charCodeAt(0) < 0x80) ascii++;
+    else if (HANGUL.test(ch)) hangul++;
     else other++;
   }
-  return Math.ceil(hangul * 1.5 + other / 3);
+  return Math.ceil(ascii / 3 + hangul * 1.5 + other * 2);
 }
 
 export function checkRequestSize(req: JevRequest): { total: number; stateAndLongest: number; ok: boolean } {
