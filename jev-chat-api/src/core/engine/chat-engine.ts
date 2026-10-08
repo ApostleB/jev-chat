@@ -152,6 +152,7 @@ export class ChatEngine {
       let decision: RouteDecision | null = decideFromTurn(policy, turnOutcome, faqCandidates);
       let settled: RelevanceSettled[] = [];
       let bStatus: BStatus;
+      const earlyDecided = decision !== null;
       if (decision) {
         bController.abort();
         // 이미 끝난 B는 실제 결과로, 진행 중이던 B는 aborted로 trace에 남긴다
@@ -180,7 +181,7 @@ export class ChatEngine {
         ...(turnOutcome ? [turnOutcome.audit] : [this.unfinishedTurnAudit(signal, turnEnd - turnStart)]),
         ...settled.map((s) =>
           s.outcome === "aborted"
-            ? { call: "relevance" as const, chunkId: s.candidate.chunk.id, status: "aborted" as const, attempts: 0, latencyMs: 0 }
+            ? this.unfinishedRelevanceAudit(s.candidate.chunk.id, signal, earlyDecided)
             : s.outcome.audit,
         ),
       ];
@@ -246,6 +247,13 @@ export class ChatEngine {
   private unfinishedTurnAudit(signal: AbortSignal, latencyMs: number): JevCallAudit {
     const timedOut = (signal.reason as Error | undefined)?.name === "TimeoutError";
     return { call: "turn", status: timedOut ? "failed" : "aborted", attempts: 0, latencyMs, errorKind: timedOut ? "timeout" : "aborted" };
+  }
+
+  /** 미완료 B의 합성 audit. 엔진 기한 초과(TimeoutError)면 failed/timeout, FAQ 조기 확정 등 그 밖의 취소는 aborted. */
+  private unfinishedRelevanceAudit(chunkId: string, signal: AbortSignal, earlyDecided: boolean): JevCallAudit {
+    // FAQ 조기 확정은 우리가 B를 취소한 것이므로, 이후 기한이 지나도 timeout으로 기록하지 않는다
+    const timedOut = !earlyDecided && (signal.reason as Error | undefined)?.name === "TimeoutError";
+    return { call: "relevance", chunkId, status: timedOut ? "failed" : "aborted", attempts: 0, latencyMs: 0, errorKind: timedOut ? "timeout" : "aborted" };
   }
 
   private bStatusOf(count: number, settled: RelevanceSettled[]): BStatus {

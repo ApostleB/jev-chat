@@ -183,6 +183,8 @@ describe("ChatEngine", () => {
     expect(r.trace.totalInputTokens).toBe(100 + 50);
     expect(r.trace.candidates.find((c) => c.id === "card-1")).toMatchObject({ status: "ok", relevance: 0.2 });
     expect(r.trace.candidates.find((c) => c.id === "card-2")).toMatchObject({ status: "aborted" });
+    // [6-4] FAQ 조기 확정으로 취소된 B는 기한 초과가 아니라 aborted
+    expect(r.trace.jevCalls.find((c) => c.chunkId === "card-2")).toMatchObject({ status: "aborted", errorKind: "aborted", attempts: 0 });
   });
 
   it("judgeTurn이 reject하면 handle도 reject하고 진행 중인 B는 abort된다", async () => {
@@ -321,8 +323,22 @@ describe("ChatEngine", () => {
     const r = await engine(judge).handle(input("법인카드 회식비", AbortSignal.timeout(30)));
     expect(r.trace.bStatus).toBe("partial");
     expect(r.trace.jevCalls.find((c) => c.chunkId === "card-1")).toMatchObject({ status: "ok", usage: { inputTokens: 50 } });
-    expect(r.trace.jevCalls.find((c) => c.chunkId === "card-2")).toMatchObject({ status: "aborted", attempts: 0 });
+    expect(r.trace.jevCalls.find((c) => c.chunkId === "card-2")).toMatchObject({ status: "failed", errorKind: "timeout", attempts: 0 }); // [6-4] 기한 초과 → timeout
     expect(r.trace.totalInputTokens).toBe(100 + 50);
+  });
+
+  it("[6-4] 일반 abort로 끝난 B는 aborted/aborted", async () => {
+    const ctrl = new AbortController();
+    const judge = new FakeJudge(
+      async () => okTurn({ regulation: 1 }),
+      (req, signal) => hangUntilAbort(signal, () => okRelevance(req.chunk.id, 0)),
+    );
+    const p = engine(judge).handle(input("법인카드 회식비", ctrl.signal));
+    setTimeout(() => ctrl.abort(), 10);
+    const r = await p;
+    const bs = r.trace.jevCalls.filter((c) => c.call === "relevance");
+    expect(bs.length).toBeGreaterThan(0);
+    for (const b of bs) expect(b).toMatchObject({ status: "aborted", errorKind: "aborted", attempts: 0 });
   });
 
   it("A 완료 직후 abort되어도 결정은 A 기준으로 정상 진행(faq)", async () => {
