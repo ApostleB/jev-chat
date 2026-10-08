@@ -97,7 +97,7 @@ chat:send → 인증·권한·zod 검증
    4) enqueue
  → [mutex 해제] → ack { messageId, turnSeq, status: accepted }
 ```
-- 큐 대기 상한 10s. 초과 시 해당 턴을 `failed(QUEUE_TIMEOUT, retryable)`로 종료.
+- 큐 대기 상한 10s — 앞 작업과 무관하게 **타이머로 만료**시켜 `failed(QUEUE_TIMEOUT, retryable)`로 종료하고 슬롯을 즉시 반환, 이후 차례가 와도 실행하지 않음.
 
 ### 처리 (ChatEngine, 엔진 기한 8s — 큐에서 꺼낸 시점부터) [F4]
 ```
@@ -262,7 +262,7 @@ message_reviews   id · trace_id · verdict(correct|wrong|partial) · expected_i
 - 실패 저장: 별도 트랜잭션으로 `status=failed, error_code, error_retryable` + (가능하면) trace.
 - 서버 시작 시 `processing` 턴을 `failed(RESTARTED, retryable)`로 일괄 변경. 영속 큐는 두지 않는다(YAGNI).
 - `jev_calls`에는 SDK HTTP 객체·헤더·키를 넣지 않는다 [R12].
-- 보관 기간: `RETENTION_DAYS`(기본 90) 지난 턴/trace/review 삭제 작업. 실사용 전 정책 확정 필요 [R12].
+- 보관 기간: `RETENTION_DAYS`(기본 90) — **턴 단위**로 생성 시각이 지난 종료 턴(processing 제외)과 그 trace/review 삭제, 이후 턴이 없는 오래된 세션 삭제. 실사용 전 정책 확정 필요 [R12].
 
 ## 4. 소켓 프로토콜 (Socket.IO `/chat`, 타입은 `packages/protocol`)
 
@@ -271,9 +271,9 @@ message_reviews   id · trace_id · verdict(correct|wrong|partial) · expected_i
 - `AuthProvider.verify(token) → { userId, roles, expiresAt? }`. 실패 `UNAUTHORIZED`, 버전 불일치 `PROTOCOL_UNSUPPORTED`(지원 버전 목록 포함). `expiresAt`이 지나면 서버가 연결 종료.
 - **MVP 구현체 `DevAuthProvider`**: `AUTH_MODE=dev`일 때만 활성. env `DEV_ACCESS_TOKEN`과 일치하면 **고정 userId `dev-admin`, roles=[user, debug, admin]인 공유 테스트 관리자 계정**. `NODE_ENV=production`이고 `AUTH_MODE=dev`이면 **서버 시작을 거부**한다.
 - 역할: **user** = 본인 세션만, **debug** = 접근 가능한 세션의 trace 열람, **admin** = 전체 세션 열람·검수·지식 재로드.
-- 세션 접근 시 `session.user_id === principal.userId` 또는 admin 확인. 소켓은 확인 후 `session:{id}` room에 참여. trace는 debug 권한 소켓에만 개별 발송(broadcast 금지).
+- 세션 접근 시 `session.user_id === principal.userId` 또는 admin 확인. 소켓은 **권한 확인 → room 참여 → 이력 조회** 순서(조회 직후 완료 이벤트 유실 방지). trace는 room 안에서 **수신 소켓의 debug 권한**으로 걸러 개별 발송(broadcast 금지).
 - 일반 사용자 소유권·역할 검증은 테스트에서 **서로 다른 principal을 주는 `FakeAuthProvider`**로 한다(공유 dev 계정으로는 검증되지 않음).
-- CORS/Origin: `CORS_ORIGINS` 허용 목록. 운영은 HTTPS/WSS.
+- CORS/Origin: `CORS_ORIGINS` 허용 목록. CORS는 polling에만 적용되므로 **WebSocket handshake에서도 Origin을 검사**한다(`allowRequest`). Origin 헤더가 없는 비브라우저 클라이언트는 토큰 인증만으로 허용. REST body는 8KB 제한. 운영은 HTTPS/WSS.
 
 ### ack 형식 [R10][R17]
 ```ts
@@ -295,7 +295,8 @@ type ErrorCode = "UNAUTHORIZED" | "FORBIDDEN" | "PROTOCOL_UNSUPPORTED" | "INVALI
 - `Turn`: `{ turnId, turnSeq, clientMsgId, userText, status, assistantText?, route?, sources?, error?: {code, retryable}, traceId? }`
 - **재연결 동기화** [F1][R10]: 클라이언트는 재연결 시 `session:start { sessionId }`로 최신 50턴을 받아 `turnSeq` 기준으로 **upsert**한다(이미 본 턴의 늦은 완료·실패도 반영됨). 더 오래된 턴은 `beforeTurnSeq` + `hasMore`로 페이지 단위로 받는다.
 - `sources[]`: `{ chunkId, versionId, contentHash, title, section }` — **실제로 보여준 근거만** [R16].
-- 멱등 [R8][F2]: 같은 `(sessionId, clientMsgId)` + 같은 text → `duplicate`. completed면 `chat:done`, failed면 저장된 `chat:error`를 재발송, processing이면 완료 시 발송(stale이면 즉시 failed). text가 다르면 `INVALID_INPUT`.
+- 멱등 [R8][F2]: 같은 `(sessionId, clientMsgId)` + 같은 text → `duplicate`. completed면 `chat:done`, failed면 저장된 `chat:error`를 **요청한 소켓에만** 재발송(재발송 제한 분당 30), processing이면 완료 시 room으로 발송(stale이면 failed 전환이 성공했을 때만 RESTARTED, 아니면 최신 결과). text가 다르면 `INVALID_INPUT`.
+- 처리 결과 이벤트는 ack보다 먼저 도착할 수 있다 — 클라이언트는 `clientMsgId`/`turnSeq` 기준 upsert.
 - 검증 [R17][F9]: `text`는 trim 후 1~1000자(유니코드 코드포인트 기준), `clientMsgId`는 uuid, `sessionId`는 uuid, 페이로드 전체 8KB 이하.
 - 제한 [R17]: 사용자당(userId 기준, 재연결 무관) 메시지 분당 10건, 세션 생성 분당 20건, 세션 대기+처리 5건 초과 시 `QUEUE_FULL(retryAfterMs)`.
 - 예약(MVP 미구현): `chat:delta { sessionId, clientMsgId, turnSeq, index, text }` — 외부 LLM 도입 시 추가 [F10].

@@ -10,6 +10,7 @@
 
 **설계 문서:** `docs/superpowers/specs/2026-10-08-jev-chat-design.md` v3 — 1장(수락·처리·종료 상태 매핑), 4장(소켓 프로토콜·REST·권한), 6장(테스트 계층), 0장 결정 9(PM2).
 **선행:** 계획 1 + 체크포인트 1 수정, 계획 2A 완료.
+**개정:** Codex 사전 검토(`docs/reviews/2026-10-08-plan2b-plan-review-codex.md`, B1~B11) 반영본. 반영 위치에 `[B#]` 표시.
 
 ## Global Constraints
 
@@ -21,6 +22,9 @@
 - 레이트 리밋(사용자 ID 기준, 재연결 무관): 메시지 분당 10건, 세션 생성 분당 20건, 관리 API 분당 30건, 지식 재로드 분당 6회.
 - 세션당 대기+처리 최대 5건, 큐 대기 상한은 실행 스냅샷 `policy.deadlines.queueMs`(기본 10000), 엔진 기한 `engineMs`(8000), 저장 기한 `saveMs`(3000).
 - 이벤트는 저장 결과를 확인한 **뒤에만** 보낸다(저장 실패를 성공으로 알리지 않음).
+- [B1] 소켓 핸들러·REST는 어떤 예외에서도 정해진 실패 형식(ack `INTERNAL` / `ApiError`)으로 응답한다. 로그에는 예외 이름만 남기고 값·SQL·스택을 클라이언트에 보내지 않는다.
+- [B3] 처리 결과 이벤트는 ack보다 먼저 도착할 수 있다. 클라이언트는 `clientMsgId`/`turnSeq` 기준 upsert로 정리한다(계획 4 계약).
+- [B5] WebSocket handshake에서 Origin 허용 목록을 검사한다(CORS는 polling에만 적용되므로). Origin 헤더가 없는 비브라우저 클라이언트는 토큰 인증만으로 허용한다.
 
 ## 파일 구조
 
@@ -428,6 +432,7 @@ describe("REST DTO", () => {
   });
   it("API 오류 본문", () => {
     expect(ApiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "권한이 없습니다." } }).error.code).toBe("FORBIDDEN");
+    expect(ApiErrorSchema.parse({ error: { code: "RATE_LIMITED", message: "x", retryAfterMs: 1500 } }).error.retryAfterMs).toBe(1500);
   });
 });
 ```
@@ -491,7 +496,9 @@ export function PageSchema<T extends z.ZodType>(item: T) {
 }
 export type Page<T> = { items: T[]; nextCursor: string | null };
 
-export const ApiErrorSchema = z.object({ error: z.object({ code: ErrorCodeSchema, message: z.string() }) });
+export const ApiErrorSchema = z.object({
+  error: z.object({ code: ErrorCodeSchema, message: z.string(), retryAfterMs: z.number().int().nonnegative().optional() }),
+});
 export type ApiError = z.infer<typeof ApiErrorSchema>;
 
 export const SessionSummarySchema = z.object({
@@ -676,15 +683,18 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `TurnStore`, `ChatEvents`, `SessionQueue`, `SlidingWindowRateLimiter`, `SnapshotService`, `NoActiveKnowledgeError`, core `ChatEngine`, `Judge`, `ExtractiveAnswerer`, `EngineResult`, `AuthedPrincipal`, `canAccessSession`, `hasRole`, mapper 함수들
 - Produces:
-  - `class ChatService` — `constructor(deps: { store: TurnStore; snapshots: Pick<SnapshotService, "current">; judge: Judge; queue: SessionQueue; sendLimiter: SlidingWindowRateLimiter; sessionLimiter: SlidingWindowRateLimiter; now?: () => number })`
-  - `startSession(p: AuthedPrincipal, req: SessionStartRequest, channel: string): Promise<Ack<SessionStartResponse>>`
-  - `send(p: AuthedPrincipal, req: ChatSendRequest, events: ChatEvents): Promise<Ack<ChatSendResponse>>`
+  - `type ReplyPort = Pick<ChatEvents, "done" | "error">` — 요청한 소켓 하나에만 보내는 포트 [B7]
+  - `class ChatService` — `constructor(deps: { store: TurnStore; snapshots: Pick<SnapshotService, "current">; judge: Judge; queue: SessionQueue; sendLimiter: SlidingWindowRateLimiter; sessionLimiter: SlidingWindowRateLimiter; replayLimiter: SlidingWindowRateLimiter; log?: (where: string, err: unknown) => void })`
+  - `authorize(p: AuthedPrincipal, sessionId: string): Promise<Ack<never> | null>` (허용이면 null, 조회 실패는 `INTERNAL`) [B1]
+  - `startSession(p: AuthedPrincipal, req: SessionStartRequest, channel: string, join: (sessionId: string) => Promise<void>): Promise<Ack<SessionStartResponse>>` — **권한 확인/생성 → join → 이력 조회** 순서 [B3]
+  - `send(p: AuthedPrincipal, req: ChatSendRequest, events: ChatEvents, reply: ReplyPort): Promise<Ack<ChatSendResponse>>`
   - `inflightCount(): number`
 
 동작 계약(설계 1장):
-- `send`: 세션 없음 → `NOT_FOUND`, 소유권 없음 → `FORBIDDEN`, 레이트 리밋 → `RATE_LIMITED(retryAfterMs)`. `withLock(sessionId)` 안에서 ① 멱등 조회(같은 text → `duplicate` ack 후 결과 재발송, 다른 text → `INVALID_INPUT`; processing인데 진행 목록에 없으면 즉시 `failed(RESTARTED)` 후 재발송) ② `tryReserve` 실패 → `QUEUE_FULL(retryAfterMs: 2000)`, DB 기록 없음 ③ `reserveTurn` 실패 → 슬롯 반환, `INTERNAL` ④ enqueue. 그 다음 `accepted` ack.
-- 처리: 큐 대기 > `queueMs` → `failTurn(QUEUE_TIMEOUT, true)` → `chat:error`. 활성 지식 없음 → `failTurn(INTERNAL, false)`. 엔진 예외 → `failTurn(INTERNAL, false)`. 정상 → `completeTurn(saveMs)` 결과 확인 후 `chat:done`(+debug면 `chat:trace`). 저장 실패 → `failTurn(INTERNAL, false)` 시도 후 `chat:error`. 모든 경로에서 슬롯 반환·진행 목록 제거.
-- 재발송은 이벤트(`chat:done`/`chat:error`)로 하며, ack는 항상 즉시 반환한다.
+- `send`: `authorize` 실패 → 해당 ack. `withLock(sessionId)` 안에서 ① 멱등 조회(같은 text → `duplicate` ack + **요청 소켓에만** 결과 재발송[B7], 재발송은 `replayLimiter`(분당 30); 다른 text → `INVALID_INPUT`) ② 새 요청 레이트 리밋 ③ `tryReserve` 실패 → `QUEUE_FULL(retryAfterMs: 2000)`, DB 기록 없음 ④ `reserveTurn` 실패 → 슬롯 반환, `INTERNAL` ⑤ 큐 만료 타이머 설정 후 enqueue. 그 밖의 예외 → `INTERNAL` ack [B1].
+- stale processing 재발송 [B2]: 진행 목록에 없으면 `failTurn(RESTARTED)` — **true일 때만** RESTARTED, false면 최신 행을 다시 읽어 실제 결과를 보낸다.
+- 큐 만료 [B4]: enqueue 시 `queueMs` 타이머. 실행 전에 만료되면 `failTurn(QUEUE_TIMEOUT, true)`(true일 때만 `chat:error`), 슬롯·진행 목록을 즉시 정확히 한 번 반환, 나중에 차례가 와도 실행하지 않는다.
+- 처리: 활성 지식 없음 / 엔진 예외 → `failTurn(INTERNAL, false)`. 정상 → `completeTurn(saveMs)` 확인 후 room에 `chat:done`, 그리고 **항상** `events.trace()`(수신 소켓 debug 필터는 Gateway)[B8]. 저장 실패 → `failTurn(INTERNAL, false)` 후 `chat:error`. 모든 경로에서 슬롯·진행 목록 정확히 한 번 반환.
 
 - [ ] **Step 1: 테스트용 인메모리 저장소 작성**
 
@@ -701,6 +711,11 @@ export class InMemoryTurnStore implements TurnStore {
   readonly turns: TurnRow[] = [];
   readonly traces = new Map<string, TraceRecord>();
   failComplete = false;
+  /** [B1] 지정한 메서드가 예외를 던지게 한다 */
+  throwOn = new Set<string>();
+  /** [B2] failTurn 직전에 실행(경합 재현용) */
+  beforeFail: (() => void) | null = null;
+  readonly calls: string[] = [];
 
   async createSession(userId: string, _channel: string) {
     const id = randomUUID();
@@ -708,6 +723,8 @@ export class InMemoryTurnStore implements TurnStore {
     return { id };
   }
   async findSession(id: string) {
+    this.calls.push("findSession");
+    if (this.throwOn.has("findSession")) throw new Error("db down");
     const s = this.sessions.get(id);
     return s ? { id: s.id, userId: s.userId } : null;
   }
@@ -737,12 +754,14 @@ export class InMemoryTurnStore implements TurnStore {
     return { traceId };
   }
   async failTurn(turnId: string, code: string, retryable: boolean) {
+    this.beforeFail?.();
     const t = this.turns.find((x) => x.id === turnId);
     if (!t || t.status !== "processing") return false;
     Object.assign(t, { status: "failed", errorCode: code, errorRetryable: retryable });
     return true;
   }
   async listTurns(sessionId: string, opts: { beforeTurnSeq?: number; limit: number }) {
+    this.calls.push("listTurns");
     const all = this.turns.filter((t) => t.sessionId === sessionId && (!opts.beforeTurnSeq || t.turnSeq < opts.beforeTurnSeq)).sort((a, b) => a.turnSeq - b.turnSeq);
     return { turns: all.slice(-opts.limit), hasMore: all.length > opts.limit };
   }
@@ -765,7 +784,7 @@ import { randomUUID } from "node:crypto";
 import type { ChatDoneEvent, ChatErrorEvent, ChatStatusEvent, ChatTraceEvent } from "@jev-chat/protocol";
 import { ChatDoneEventSchema, ChatErrorEventSchema } from "@jev-chat/protocol";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_POLICY, type Judge } from "../../core";
+import { DEFAULT_POLICY, type Judge, type Policy } from "../../core";
 import { chunkFixture, faqFixture } from "../../core/testing/fixtures";
 import { FakeJudge, makeSnapshot, okRelevance, okTurn } from "../../core/testing/fakes";
 import { ChatService } from "./chat.service";
@@ -778,17 +797,17 @@ const chunks = [chunkFixture({ id: "card-1", title: "법인카드 규정", secti
 const faqs = [faqFixture({ id: "faq-card", summary: "법인카드 1회 한도", variants: ["법인카드 한도 얼마예요"], answer: "1회 50만 원입니다.", sourceChunkId: "card-1" })];
 const alice = { userId: "alice", roles: ["user" as const] };
 const bob = { userId: "bob", roles: ["user" as const] };
-const debugAlice = { userId: "alice", roles: ["user" as const, "debug" as const] };
 
 class Recorder implements ChatEvents {
+  log: string[] = [];
   statuses: ChatStatusEvent[] = [];
   dones: ChatDoneEvent[] = [];
   errors: ChatErrorEvent[] = [];
   traces: ChatTraceEvent[] = [];
-  status(e: ChatStatusEvent) { this.statuses.push(e); }
-  done(e: ChatDoneEvent) { this.dones.push(ChatDoneEventSchema.parse(e)); }
-  error(e: ChatErrorEvent) { this.errors.push(ChatErrorEventSchema.parse(e)); }
-  trace(_s: string, e: ChatTraceEvent) { this.traces.push(e); }
+  status(e: ChatStatusEvent) { this.statuses.push(e); this.log.push(`status:${e.stage}`); }
+  done(e: ChatDoneEvent) { this.dones.push(ChatDoneEventSchema.parse(e)); this.log.push("done"); }
+  error(e: ChatErrorEvent) { this.errors.push(ChatErrorEventSchema.parse(e)); this.log.push(`error:${e.code}`); }
+  trace(_s: string, e: ChatTraceEvent) { this.traces.push(e); this.log.push("trace"); }
 }
 
 const faqJudge = () =>
@@ -797,7 +816,7 @@ const faqJudge = () =>
     async (req) => okRelevance(req.chunk.id, 0.1),
   );
 
-function setup(opts: { judge?: Judge; capacity?: number; sendLimit?: number; policy?: typeof DEFAULT_POLICY; now?: () => number } = {}) {
+function setup(opts: { judge?: Judge; capacity?: number; sendLimit?: number; policy?: Policy } = {}) {
   const store = new InMemoryTurnStore();
   const snap = makeSnapshot({ chunks, faqs, ...(opts.policy ? { policy: opts.policy } : {}) });
   const svc = new ChatService({
@@ -807,61 +826,69 @@ function setup(opts: { judge?: Judge; capacity?: number; sendLimit?: number; pol
     queue: new SessionQueue({ capacity: opts.capacity ?? 5 }),
     sendLimiter: new SlidingWindowRateLimiter(opts.sendLimit ?? 10, 60_000),
     sessionLimiter: new SlidingWindowRateLimiter(20, 60_000),
-    ...(opts.now ? { now: opts.now } : {}),
+    replayLimiter: new SlidingWindowRateLimiter(30, 60_000),
+    log: () => {},
   });
   return { store, svc };
 }
 
-const settle = () => new Promise((r) => setTimeout(r, 20));
+const settle = (ms = 20) => new Promise((r) => setTimeout(r, ms));
+const noJoin = async () => {};
 
 async function session(svc: ChatService, p = alice) {
-  const r = await svc.startSession(p, {}, "front-test");
+  const r = await svc.startSession(p, {}, "front-test", noJoin);
   if (!r.ok) throw new Error("session");
   return r.data.sessionId;
 }
 
+const send = (svc: ChatService, p: typeof alice, sessionId: string, text: string, ev = new Recorder(), reply = new Recorder(), clientMsgId = randomUUID()) =>
+  svc.send(p, { sessionId, clientMsgId, text }, ev, reply);
+
 describe("ChatService", () => {
-  it("정상 흐름: accepted ack → status → done(저장 후)", async () => {
+  it("정상 흐름: status(queued) → accepted ack → status → done(저장 후) → trace(항상 포트로)", async () => {
     const { store, svc } = setup();
     const sid = await session(svc);
     const ev = new Recorder();
-    const ack = await svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "법인카드 한도 얼마예요" }, ev);
+    const ack = await send(svc, alice, sid, "법인카드 한도 얼마예요", ev);
+    ev.log.push("ack");
     expect(ack).toMatchObject({ ok: true, data: { status: "accepted", turnSeq: 1 } });
     await settle();
-    expect(ev.dones).toHaveLength(1);
+    expect(ev.log).toEqual(["status:queued", "ack", "status:judging", "status:answering", "done", "trace"]);
     expect(ev.dones[0]).toMatchObject({ route: "faq", turnSeq: 1 });
-    expect(ev.statuses.map((s) => s.stage)).toEqual(["queued", "judging", "answering"]);
     expect(store.turns[0]?.status).toBe("completed");
-    expect(ev.traces).toHaveLength(0); // debug 아님
-  });
-
-  it("debug 권한이면 trace도 보낸다", async () => {
-    const { svc } = setup();
-    const sid = await session(svc, debugAlice);
-    const ev = new Recorder();
-    await svc.send(debugAlice, { sessionId: sid, clientMsgId: randomUUID(), text: "법인카드 한도 얼마예요" }, ev);
-    await settle();
-    expect(ev.traces).toHaveLength(1);
-    expect(ev.traces[0]?.trace).toMatchObject({ route: "faq" });
   });
 
   it("다른 사용자의 세션 → FORBIDDEN, 없는 세션 → NOT_FOUND", async () => {
     const { svc } = setup();
     const sid = await session(svc, alice);
-    expect(await svc.send(bob, { sessionId: sid, clientMsgId: randomUUID(), text: "q" }, new Recorder())).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
-    expect(await svc.send(alice, { sessionId: randomUUID(), clientMsgId: randomUUID(), text: "q" }, new Recorder())).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+    expect(await send(svc, bob, sid, "q")).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    expect(await send(svc, alice, randomUUID(), "q")).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
   });
 
-  it("멱등: 같은 clientMsgId+text → duplicate, 완료 결과를 이벤트로 재발송", async () => {
+  it("[B1] 저장소 조회 예외 → INTERNAL ack(예외를 던지지 않음), 슬롯 누수 없음", async () => {
+    const { store, svc } = setup();
+    const sid = await session(svc);
+    store.throwOn.add("findSession");
+    expect(await send(svc, alice, sid, "q")).toMatchObject({ ok: false, error: { code: "INTERNAL" } });
+    expect(await svc.startSession(alice, { sessionId: sid }, "front-test", noJoin)).toMatchObject({ ok: false, error: { code: "INTERNAL" } });
+    store.throwOn.clear();
+    expect((await send(svc, alice, sid, "법인카드 한도 얼마예요")).ok).toBe(true);
+    await settle();
+    expect(svc.inflightCount()).toBe(0);
+  });
+
+  it("[B7] 멱등 재전송: duplicate ack, 결과는 요청 소켓(reply)에만 재발송", async () => {
     const { store, svc } = setup();
     const sid = await session(svc);
     const id = randomUUID();
-    await svc.send(alice, { sessionId: sid, clientMsgId: id, text: "법인카드 한도 얼마예요" }, new Recorder());
+    await send(svc, alice, sid, "법인카드 한도 얼마예요", new Recorder(), new Recorder(), id);
     await settle();
-    const ev = new Recorder();
-    expect(await svc.send(alice, { sessionId: sid, clientMsgId: id, text: "법인카드 한도 얼마예요" }, ev)).toMatchObject({ ok: true, data: { status: "duplicate", turnSeq: 1 } });
+    const room = new Recorder();
+    const reply = new Recorder();
+    expect(await send(svc, alice, sid, "법인카드 한도 얼마예요", room, reply, id)).toMatchObject({ ok: true, data: { status: "duplicate", turnSeq: 1 } });
     await settle();
-    expect(ev.dones).toHaveLength(1);
+    expect(reply.dones).toHaveLength(1);
+    expect(room.dones).toHaveLength(0);
     expect(store.turns).toHaveLength(1);
   });
 
@@ -869,42 +896,54 @@ describe("ChatService", () => {
     const { svc } = setup();
     const sid = await session(svc);
     const id = randomUUID();
-    await svc.send(alice, { sessionId: sid, clientMsgId: id, text: "a" }, new Recorder());
-    expect(await svc.send(alice, { sessionId: sid, clientMsgId: id, text: "b" }, new Recorder())).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+    await send(svc, alice, sid, "a", new Recorder(), new Recorder(), id);
+    expect(await send(svc, alice, sid, "b", new Recorder(), new Recorder(), id)).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
   });
 
-  it("stale processing(진행 목록에 없음) 재전송 → 즉시 failed(RESTARTED) 후 chat:error", async () => {
+  it("stale processing 재전송 → failTurn 성공 시에만 RESTARTED", async () => {
     const { store, svc } = setup();
     const sid = await session(svc);
     const id = randomUUID();
-    await store.reserveTurn({ sessionId: sid, clientMsgId: id, userText: "q" }); // 서버 재시작 전 남은 턴 흉내
-    const ev = new Recorder();
-    expect(await svc.send(alice, { sessionId: sid, clientMsgId: id, text: "q" }, ev)).toMatchObject({ ok: true, data: { status: "duplicate" } });
+    await store.reserveTurn({ sessionId: sid, clientMsgId: id, userText: "q" });
+    const reply = new Recorder();
+    await send(svc, alice, sid, "q", new Recorder(), reply, id);
     await settle();
-    expect(ev.errors[0]).toMatchObject({ code: "RESTARTED", retryable: true });
+    expect(reply.errors[0]).toMatchObject({ code: "RESTARTED", retryable: true });
   });
 
-  it("세션 대기+처리 5건 초과 → QUEUE_FULL, DB 기록 없음", async () => {
+  it("[B2] stale 조회 후 그 사이 완료됐다면 RESTARTED가 아니라 실제 결과를 보낸다", async () => {
+    const { store, svc } = setup();
+    const sid = await session(svc);
+    const id = randomUUID();
+    const row = await store.reserveTurn({ sessionId: sid, clientMsgId: id, userText: "q" });
+    store.beforeFail = () => Object.assign(row, { status: "completed", assistantText: "이미 완료", route: "faq", sources: [], traceId: "tr-x" });
+    const reply = new Recorder();
+    await send(svc, alice, sid, "q", new Recorder(), reply, id);
+    await settle();
+    expect(reply.errors).toHaveLength(0);
+    expect(reply.dones[0]).toMatchObject({ text: "이미 완료", traceId: "tr-x" });
+  });
+
+  it("세션 대기+처리 capacity 초과 → QUEUE_FULL, DB 기록 없음, 슬롯 반환 후 다시 가능", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const judge = new FakeJudge(async () => { await gate; return okTurn({ regulation: 1 }); }, async (req) => okRelevance(req.chunk.id, 0.9));
     const { store, svc } = setup({ judge, capacity: 2 });
     const sid = await session(svc);
-    const send = () => svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "법인카드" }, new Recorder());
-    expect((await send()).ok).toBe(true);
-    expect((await send()).ok).toBe(true);
-    expect(await send()).toMatchObject({ ok: false, error: { code: "QUEUE_FULL", retryAfterMs: 2000 } });
+    expect((await send(svc, alice, sid, "법인카드")).ok).toBe(true);
+    expect((await send(svc, alice, sid, "법인카드")).ok).toBe(true);
+    expect(await send(svc, alice, sid, "법인카드")).toMatchObject({ ok: false, error: { code: "QUEUE_FULL", retryAfterMs: 2000 } });
     expect(store.turns).toHaveLength(2);
     release();
     await settle();
-    expect((await send()).ok).toBe(true); // 슬롯 반환 후 다시 가능
+    expect((await send(svc, alice, sid, "법인카드")).ok).toBe(true);
   });
 
   it("레이트 리밋 → RATE_LIMITED + retryAfterMs", async () => {
     const { svc } = setup({ sendLimit: 1 });
     const sid = await session(svc);
-    await svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "a" }, new Recorder());
-    const r = await svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "b" }, new Recorder());
+    await send(svc, alice, sid, "a");
+    const r = await send(svc, alice, sid, "b");
     expect(r).toMatchObject({ ok: false, error: { code: "RATE_LIMITED" } });
     if (!r.ok) expect(r.error.retryAfterMs).toBeGreaterThan(0);
   });
@@ -913,26 +952,29 @@ describe("ChatService", () => {
     const judge = new FakeJudge(async () => okTurn({ regulation: 1 }), async (req) => okRelevance(req.chunk.id, 0.9));
     const { svc } = setup({ judge });
     const sid = await session(svc);
-    await svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "법인카드 한도" }, new Recorder());
-    await svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "그럼 회식비는요?" }, new Recorder());
+    await send(svc, alice, sid, "법인카드 한도");
+    await send(svc, alice, sid, "그럼 회식비는요?");
     await settle();
     expect(judge.turnCalls[1]?.recentTurns.map((t) => t.role)).toEqual(["user", "assistant"]);
   });
 
-  it("큐 대기가 queueMs를 넘으면 failed(QUEUE_TIMEOUT)", async () => {
-    let t = 0;
+  it("[B4] 앞 작업이 끝나지 않아도 queueMs가 지나면 즉시 QUEUE_TIMEOUT, 슬롯 회수, 나중에도 실행 안 함", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const judge = new FakeJudge(async () => { await gate; return okTurn({ regulation: 1 }); }, async (req) => okRelevance(req.chunk.id, 0.9));
-    const { svc } = setup({ judge, now: () => t });
+    const policy: Policy = { ...DEFAULT_POLICY, deadlines: { ...DEFAULT_POLICY.deadlines, queueMs: 50 } };
+    const { store, svc } = setup({ judge, policy, capacity: 2 });
     const sid = await session(svc);
-    await svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "법인카드" }, new Recorder());
+    await send(svc, alice, sid, "법인카드 첫째");
     const ev = new Recorder();
-    await svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "법인카드 둘째" }, ev);
-    t = DEFAULT_POLICY.deadlines.queueMs + 1;
-    release();
-    await settle();
+    await send(svc, alice, sid, "법인카드 둘째", ev);
+    await settle(120); // 앞 작업은 여전히 대기 중
     expect(ev.errors[0]).toMatchObject({ code: "QUEUE_TIMEOUT", retryable: true });
+    expect(store.turns[1]?.status).toBe("failed");
+    expect((await send(svc, alice, sid, "법인카드 셋째")).ok).toBe(true); // 슬롯 회수(capacity 2)
+    release();
+    await settle(80);
+    expect(judge.turnCalls.map((c) => c.message)).not.toContain("법인카드 둘째");
   });
 
   it("엔진 예외 → failed(INTERNAL) + chat:error, 큐는 계속 동작", async () => {
@@ -940,7 +982,7 @@ describe("ChatService", () => {
     const { store, svc } = setup({ judge });
     const sid = await session(svc);
     const ev = new Recorder();
-    await svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "법인카드" }, ev);
+    await send(svc, alice, sid, "법인카드", ev);
     await settle();
     expect(ev.errors[0]).toMatchObject({ code: "INTERNAL", retryable: false });
     expect(store.turns[0]?.status).toBe("failed");
@@ -952,7 +994,7 @@ describe("ChatService", () => {
     store.failComplete = true;
     const sid = await session(svc);
     const ev = new Recorder();
-    await svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "법인카드 한도 얼마예요" }, ev);
+    await send(svc, alice, sid, "법인카드 한도 얼마예요", ev);
     await settle();
     expect(ev.dones).toHaveLength(0);
     expect(ev.errors[0]).toMatchObject({ code: "INTERNAL" });
@@ -966,22 +1008,26 @@ describe("ChatService", () => {
     const { svc } = setup({ judge });
     const sid = await session(svc);
     const ev = new Recorder();
-    await svc.send(alice, { sessionId: sid, clientMsgId: randomUUID(), text: "법인카드" }, ev);
+    await send(svc, alice, sid, "법인카드", ev);
     await settle();
     expect(ev.dones[0]).toMatchObject({ route: "error", error: { code: "JEV_UNAVAILABLE", retryable: true } });
   });
 
-  it("startSession: 새 세션 생성, 기존 세션은 최신 50턴 + hasMore/nextBeforeTurnSeq", async () => {
+  it("[B3] startSession: join이 이력 조회보다 먼저, 권한 없으면 join 안 함, 최신 50턴 + hasMore", async () => {
     const { store, svc } = setup();
-    const created = await svc.startSession(alice, {}, "front-test");
+    const created = await svc.startSession(alice, {}, "front-test", noJoin);
     expect(created).toMatchObject({ ok: true, data: { turns: [], hasMore: false } });
     const sid = created.ok ? created.data.sessionId : "";
     for (let i = 0; i < 52; i++) await store.reserveTurn({ sessionId: sid, clientMsgId: randomUUID(), userText: `q${i}` });
-    const r = await svc.startSession(alice, { sessionId: sid }, "front-test");
+    store.calls.length = 0;
+    const r = await svc.startSession(alice, { sessionId: sid }, "front-test", async () => void store.calls.push("join"));
+    expect(store.calls.indexOf("join")).toBeLessThan(store.calls.indexOf("listTurns"));
     expect(r.ok && r.data.turns.length).toBe(50);
     expect(r.ok && r.data.hasMore).toBe(true);
     expect(r.ok && r.data.nextBeforeTurnSeq).toBe(3);
-    expect(await svc.startSession(bob, { sessionId: sid }, "front-test")).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    let joined = false;
+    expect(await svc.startSession(bob, { sessionId: sid }, "front-test", async () => void (joined = true))).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    expect(joined).toBe(false);
   });
 });
 ```
@@ -995,7 +1041,6 @@ Expected: FAIL — 모듈 없음
 
 `jev-chat-api/src/app/chat/chat.service.ts`:
 ```ts
-import { randomUUID } from "node:crypto";
 import type {
   Ack,
   ChatSendRequest,
@@ -1004,10 +1049,10 @@ import type {
   SessionStartRequest,
   SessionStartResponse,
 } from "@jev-chat/protocol";
-import { ChatEngine, ExtractiveAnswerer, type EngineResult, type Judge } from "../../core";
+import { ChatEngine, DEFAULT_POLICY, ExtractiveAnswerer, type EngineResult, type ExecutionSnapshot, type Judge } from "../../core";
 import type { TurnRow } from "../../adapters/persistence/turn.repository";
 import type { AuthedPrincipal } from "../auth/auth.types";
-import { canAccessSession, hasRole } from "../auth/access";
+import { canAccessSession } from "../auth/access";
 import type { SnapshotService } from "../knowledge/snapshot.service";
 import type { ChatEvents } from "./chat-events";
 import type { SlidingWindowRateLimiter } from "./rate-limiter";
@@ -1018,6 +1063,9 @@ import type { TurnStore } from "./turn-store";
 const HISTORY_LIMIT = 50;
 const QUEUE_FULL_RETRY_MS = 2000;
 
+/** [B7] 요청한 소켓 하나에만 보내는 포트 */
+export type ReplyPort = Pick<ChatEvents, "done" | "error">;
+
 interface Deps {
   store: TurnStore;
   snapshots: Pick<SnapshotService, "current">;
@@ -1025,7 +1073,16 @@ interface Deps {
   queue: SessionQueue;
   sendLimiter: SlidingWindowRateLimiter;
   sessionLimiter: SlidingWindowRateLimiter;
-  now?: () => number;
+  replayLimiter: SlidingWindowRateLimiter;
+  /** 예외 이름만 기록한다(값·SQL·스택 금지) */
+  log?: (where: string, err: unknown) => void;
+}
+
+/** [B4] 큐에 들어간 턴의 상태. 만료와 실행 중 하나만 일어난다. */
+interface QueuedTurn {
+  started: boolean;
+  expired: boolean;
+  timer: NodeJS.Timeout | null;
 }
 
 function fail<T>(code: ErrorCode, retryAfterMs?: number): Ack<T> {
@@ -1036,132 +1093,193 @@ function fail<T>(code: ErrorCode, retryAfterMs?: number): Ack<T> {
 export class ChatService {
   private readonly inflight = new Set<string>();
   private readonly engine: ChatEngine;
-  private readonly now: () => number;
+  private readonly log: (where: string, err: unknown) => void;
 
   constructor(private readonly deps: Deps) {
-    this.now = deps.now ?? (() => Date.now());
     this.engine = new ChatEngine({ judge: deps.judge, answerer: new ExtractiveAnswerer(), contextReader: deps.store });
+    this.log = deps.log ?? (() => {});
   }
 
   inflightCount(): number {
     return this.inflight.size;
   }
 
-  async startSession(p: AuthedPrincipal, req: SessionStartRequest, channel: string): Promise<Ack<SessionStartResponse>> {
-    let sessionId = req.sessionId;
-    if (!sessionId) {
-      const limited = this.deps.sessionLimiter.take(p.userId);
-      if (!limited.ok) return fail("RATE_LIMITED", limited.retryAfterMs);
-      sessionId = (await this.deps.store.createSession(p.userId, channel)).id;
-    } else {
+  /** 세션 접근 권한. 허용이면 null. [B1] 조회 실패는 INTERNAL */
+  async authorize(p: AuthedPrincipal, sessionId: string): Promise<Ack<never> | null> {
+    try {
       const s = await this.deps.store.findSession(sessionId);
       if (!s) return fail("NOT_FOUND");
       if (!canAccessSession(p, s.userId)) return fail("FORBIDDEN");
+      return null;
+    } catch (e) {
+      this.log("authorize", e);
+      return fail("INTERNAL");
     }
-    const page = await this.deps.store.listTurns(sessionId, { limit: HISTORY_LIMIT, ...(req.beforeTurnSeq ? { beforeTurnSeq: req.beforeTurnSeq } : {}) });
-    const first = page.turns[0];
-    return {
-      ok: true,
-      data: {
-        sessionId,
-        turns: page.turns.map(toProtocolTurn),
-        hasMore: page.hasMore,
-        ...(page.hasMore && first ? { nextBeforeTurnSeq: first.turnSeq } : {}),
-      },
-    };
   }
 
-  async send(p: AuthedPrincipal, req: ChatSendRequest, events: ChatEvents): Promise<Ack<ChatSendResponse>> {
-    const session = await this.deps.store.findSession(req.sessionId);
-    if (!session) return fail("NOT_FOUND");
-    if (!canAccessSession(p, session.userId)) return fail("FORBIDDEN");
-
-    return this.deps.queue.withLock(req.sessionId, async () => {
-      // ① 멱등 조회 (큐가 가득 차도 동작)
-      const existing = await this.deps.store.findTurnByClientMsgId(req.sessionId, req.clientMsgId);
-      if (existing) {
-        if (existing.userText !== req.text) return fail<ChatSendResponse>("INVALID_INPUT");
-        await this.replay(existing, events);
-        return { ok: true, data: { turnId: existing.id, turnSeq: existing.turnSeq, status: "duplicate" } };
+  /** [B3] 권한 확인(또는 생성) → join → 이력 조회. 조회 이후의 완료 이벤트는 이미 room에서 받는다. */
+  async startSession(
+    p: AuthedPrincipal,
+    req: SessionStartRequest,
+    channel: string,
+    join: (sessionId: string) => Promise<void>,
+  ): Promise<Ack<SessionStartResponse>> {
+    try {
+      let sessionId = req.sessionId;
+      if (!sessionId) {
+        const limited = this.deps.sessionLimiter.take(p.userId);
+        if (!limited.ok) return fail("RATE_LIMITED", limited.retryAfterMs);
+        sessionId = (await this.deps.store.createSession(p.userId, channel)).id;
+      } else {
+        const denied = await this.authorize(p, sessionId);
+        if (denied) return denied;
       }
-      // 레이트 리밋은 새 요청에만 적용(중복 재전송은 복구 경로라 제한하지 않음)
-      const limited = this.deps.sendLimiter.take(p.userId);
-      if (!limited.ok) return fail<ChatSendResponse>("RATE_LIMITED", limited.retryAfterMs);
-      // ② 슬롯 예약
-      if (!this.deps.queue.tryReserve(req.sessionId)) return fail<ChatSendResponse>("QUEUE_FULL", QUEUE_FULL_RETRY_MS);
-      // ③ DB 원자 예약
-      let turn: TurnRow;
-      try {
-        turn = await this.deps.store.reserveTurn({
-          sessionId: req.sessionId,
-          clientMsgId: req.clientMsgId,
-          userText: req.text,
-          ...(req.retryOfTurnSeq ? { retryOfTurnSeq: req.retryOfTurnSeq } : {}),
-        });
-      } catch {
-        this.deps.queue.release(req.sessionId);
-        return fail<ChatSendResponse>("INTERNAL");
-      }
-      // ④ enqueue
-      this.inflight.add(turn.id);
-      const enqueuedAt = this.now();
-      events.status({ sessionId: req.sessionId, clientMsgId: turn.clientMsgId, turnSeq: turn.turnSeq, stage: "queued" });
-      this.deps.queue.run(req.sessionId, () => this.process(p, turn, enqueuedAt, events));
-      return { ok: true, data: { turnId: turn.id, turnSeq: turn.turnSeq, status: "accepted" } };
-    });
+      await join(sessionId);
+      const page = await this.deps.store.listTurns(sessionId, { limit: HISTORY_LIMIT, ...(req.beforeTurnSeq ? { beforeTurnSeq: req.beforeTurnSeq } : {}) });
+      const first = page.turns[0];
+      return {
+        ok: true,
+        data: {
+          sessionId,
+          turns: page.turns.map(toProtocolTurn),
+          hasMore: page.hasMore,
+          ...(page.hasMore && first ? { nextBeforeTurnSeq: first.turnSeq } : {}),
+        },
+      };
+    } catch (e) {
+      this.log("startSession", e);
+      return fail("INTERNAL");
+    }
   }
 
-  /** 이미 있는 턴의 결과를 이벤트로 다시 보낸다. stale processing은 failed(RESTARTED)로 확정한다. */
-  private async replay(row: TurnRow, events: ChatEvents): Promise<void> {
-    if (row.status === "completed") {
-      queueMicrotask(() => events.done(toDoneEvent(row, row.sessionId)));
-      return;
+  async send(p: AuthedPrincipal, req: ChatSendRequest, events: ChatEvents, reply: ReplyPort): Promise<Ack<ChatSendResponse>> {
+    const denied = await this.authorize(p, req.sessionId);
+    if (denied) return denied;
+    try {
+      return await this.deps.queue.withLock(req.sessionId, async () => {
+        // ① 멱등 조회 (큐가 가득 차도 동작)
+        const existing = await this.deps.store.findTurnByClientMsgId(req.sessionId, req.clientMsgId);
+        if (existing) {
+          if (existing.userText !== req.text) return fail<ChatSendResponse>("INVALID_INPUT");
+          const limited = this.deps.replayLimiter.take(p.userId);
+          if (!limited.ok) return fail<ChatSendResponse>("RATE_LIMITED", limited.retryAfterMs);
+          await this.replay(existing, reply);
+          return { ok: true, data: { turnId: existing.id, turnSeq: existing.turnSeq, status: "duplicate" } };
+        }
+        // ② 새 요청 레이트 리밋
+        const limited = this.deps.sendLimiter.take(p.userId);
+        if (!limited.ok) return fail<ChatSendResponse>("RATE_LIMITED", limited.retryAfterMs);
+        // ③ 슬롯 예약
+        if (!this.deps.queue.tryReserve(req.sessionId)) return fail<ChatSendResponse>("QUEUE_FULL", QUEUE_FULL_RETRY_MS);
+        // ④ DB 원자 예약
+        let turn: TurnRow;
+        try {
+          turn = await this.deps.store.reserveTurn({
+            sessionId: req.sessionId,
+            clientMsgId: req.clientMsgId,
+            userText: req.text,
+            ...(req.retryOfTurnSeq ? { retryOfTurnSeq: req.retryOfTurnSeq } : {}),
+          });
+        } catch (e) {
+          this.deps.queue.release(req.sessionId);
+          this.log("reserveTurn", e);
+          return fail<ChatSendResponse>("INTERNAL");
+        }
+        // ⑤ 만료 타이머 + enqueue [B4]
+        this.inflight.add(turn.id);
+        const state: QueuedTurn = { started: false, expired: false, timer: null };
+        state.timer = setTimeout(() => void this.expire(turn, state, events), this.queueMs());
+        state.timer.unref?.();
+        events.status({ sessionId: req.sessionId, clientMsgId: turn.clientMsgId, turnSeq: turn.turnSeq, stage: "queued" });
+        this.deps.queue.run(req.sessionId, () => this.process(p, turn, state, events));
+        return { ok: true, data: { turnId: turn.id, turnSeq: turn.turnSeq, status: "accepted" } };
+      });
+    } catch (e) {
+      this.log("send", e);
+      return fail("INTERNAL");
     }
-    if (row.status === "failed") {
-      queueMicrotask(() => events.error(toErrorEvent(row, row.sessionId)));
-      return;
-    }
-    if (!this.inflight.has(row.id)) {
-      await this.deps.store.failTurn(row.id, "RESTARTED", true);
-      const failed = { ...row, status: "failed" as const, errorCode: "RESTARTED", errorRetryable: true };
-      queueMicrotask(() => events.error(toErrorEvent(failed, row.sessionId)));
-    }
-    // 진행 중이면 처리 완료 시 room 이벤트로 받게 된다
   }
 
-  private async process(p: AuthedPrincipal, turn: TurnRow, enqueuedAt: number, events: ChatEvents): Promise<void> {
+  private queueMs(): number {
+    try {
+      return this.deps.snapshots.current().policy.deadlines.queueMs;
+    } catch {
+      return DEFAULT_POLICY.deadlines.queueMs;
+    }
+  }
+
+  /** 슬롯·진행 목록을 정확히 한 번 반환 */
+  private finish(turn: TurnRow, state: QueuedTurn): void {
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = null;
+    if (!this.inflight.delete(turn.id)) return;
+    this.deps.queue.release(turn.sessionId);
+  }
+
+  /** [B4] 실행 전에 대기 상한이 지나면 실패로 확정한다 */
+  private async expire(turn: TurnRow, state: QueuedTurn, events: ChatEvents): Promise<void> {
+    if (state.started || state.expired) return;
+    state.expired = true;
+    try {
+      const changed = await this.deps.store.failTurn(turn.id, "QUEUE_TIMEOUT", true);
+      if (changed) events.error(toErrorEvent({ ...turn, status: "failed", errorCode: "QUEUE_TIMEOUT", errorRetryable: true }, turn.sessionId));
+    } catch (e) {
+      this.log("expire", e);
+    } finally {
+      this.finish(turn, state);
+    }
+  }
+
+  /** [B2][B7] 이미 있는 턴의 결과를 요청 소켓에 다시 보낸다 */
+  private async replay(row: TurnRow, reply: ReplyPort): Promise<void> {
+    let current: TurnRow = row;
+    if (current.status === "processing") {
+      if (this.inflight.has(current.id)) return; // 처리 중이면 room 이벤트로 받게 된다
+      const changed = await this.deps.store.failTurn(current.id, "RESTARTED", true);
+      current = changed
+        ? { ...current, status: "failed", errorCode: "RESTARTED", errorRetryable: true }
+        : ((await this.deps.store.findTurnByClientMsgId(current.sessionId, current.clientMsgId)) ?? current);
+    }
+    const final = current;
+    if (final.status === "completed") queueMicrotask(() => reply.done(toDoneEvent(final, final.sessionId)));
+    else if (final.status === "failed") queueMicrotask(() => reply.error(toErrorEvent(final, final.sessionId)));
+  }
+
+  private async process(p: AuthedPrincipal, turn: TurnRow, state: QueuedTurn, events: ChatEvents): Promise<void> {
+    if (state.expired) return; // 만료된 작업은 실행하지 않는다(정리는 expire가 함)
+    state.started = true;
+    if (state.timer) clearTimeout(state.timer);
     const ref = { sessionId: turn.sessionId, clientMsgId: turn.clientMsgId, turnSeq: turn.turnSeq };
     const failWith = async (code: ErrorCode, retryable: boolean) => {
-      const changed = await this.deps.store.failTurn(turn.id, code, retryable).catch(() => false);
+      const changed = await this.deps.store.failTurn(turn.id, code, retryable).catch((e) => (this.log("failTurn", e), false));
       if (changed) events.error(toErrorEvent({ ...turn, status: "failed", errorCode: code, errorRetryable: retryable }, turn.sessionId));
     };
     try {
-      let snapshot;
+      let snapshot: ExecutionSnapshot;
       try {
         snapshot = this.deps.snapshots.current();
-      } catch {
+      } catch (e) {
+        this.log("snapshot", e);
         await failWith("INTERNAL", false);
         return;
       }
-      const { queueMs, engineMs, saveMs } = snapshot.policy.deadlines;
-      if (this.now() - enqueuedAt > queueMs) {
-        await failWith("QUEUE_TIMEOUT", true);
-        return;
-      }
+      const { engineMs, saveMs } = snapshot.policy.deadlines;
       let result: EngineResult;
       try {
         result = await this.engine.handle(
           { principal: p, sessionId: turn.sessionId, turnId: turn.id, turnSeq: turn.turnSeq, text: turn.userText, snapshot, signal: AbortSignal.timeout(engineMs) },
           (prog) => events.status({ ...ref, stage: prog.stage }),
         );
-      } catch {
+      } catch (e) {
+        this.log("engine", e);
         await failWith("INTERNAL", false);
         return;
       }
       let saved: { traceId: string } | null;
       try {
         saved = await this.deps.store.completeTurn(turn.id, result, { saveMs });
-      } catch {
+      } catch (e) {
+        this.log("completeTurn", e);
         await failWith("INTERNAL", false);
         return;
       }
@@ -1177,22 +1295,20 @@ export class ChatService {
         errorRetryable: result.route === "error" ? true : null,
       };
       events.done(toDoneEvent(row, turn.sessionId));
-      if (hasRole(p, "debug")) events.trace(turn.sessionId, { traceId: saved.traceId, trace: JSON.parse(JSON.stringify(result.trace)) });
+      // [B8] trace는 항상 포트로 보낸다. 받는 소켓의 debug 권한은 Gateway가 거른다.
+      events.trace(turn.sessionId, { traceId: saved.traceId, trace: JSON.parse(JSON.stringify(result.trace)) });
     } finally {
-      this.inflight.delete(turn.id);
-      this.deps.queue.release(turn.sessionId);
+      this.finish(turn, state);
     }
   }
 }
-
-export const newClientMsgId = randomUUID;
 ```
-※ 멱등 재전송 시 레이트 리밋을 적용하지 않는다(설계 4장 멱등 규칙상 중복은 결과 조회 경로). `chat:trace`는 이 서비스가 아니라 Gateway의 `trace()` 구현이 debug 소켓에만 보낸다(Task 4). 서비스는 요청자가 debug일 때만 trace를 내보내고, Gateway는 다시 수신 소켓의 권한을 확인한다.
+※ 중복 재전송은 새 요청 레이트 리밋 대신 `replayLimiter`(분당 30)만 적용한다[B7]. trace 수신 필터는 Gateway 책임이다[B8].
 
 - [ ] **Step 5: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test -- chat.service && pnpm --filter jev-chat-api typecheck`
-Expected: PASS (13건)
+Expected: PASS (15건)
 
 - [ ] **Step 6: 커밋**
 
@@ -1210,7 +1326,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `jev-chat-api/package.json` (의존성 추가), `jev-chat-api/src/app/main.ts`, `jev-chat-api/src/app/app.module.ts`
 - Create: `jev-chat-api/src/app/chat/{io.adapter.ts,chat.gateway.ts}`, `jev-chat-api/src/app/chat.module.ts`, `jev-chat-api/src/app/auth/auth.module.ts`
-- Test: `jev-chat-api/src/app/chat/chat.gateway.e2e.spec.ts`
+- Test: `jev-chat-api/src/app/chat/chat.gateway.e2e.spec.ts`, `jev-chat-api/src/app/chat/io.adapter.spec.ts`
 
 **Interfaces:**
 - Consumes: `ChatService`, `AUTH_PROVIDER`, `AuthProvider`, protocol 스키마·이벤트 타입, `SUPPORTED_PROTOCOL_VERSIONS`, `isWithinPayloadLimit`
@@ -1232,6 +1348,7 @@ import "reflect-metadata";
 import { resolve } from "node:path";
 import { NestFactory } from "@nestjs/core";
 import type { INestApplication } from "@nestjs/common";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import type { Judge } from "../../core";
 import { loadDomainPack } from "../../adapters/knowledge/pack-loader";
 import { KnowledgeRepository } from "../../adapters/persistence/knowledge.repository";
@@ -1262,7 +1379,8 @@ export async function createTestApp(opts: { judge: Judge; auth: AuthProvider }):
     .overrideProvider(JUDGE).useValue(opts.judge)
     .overrideProvider(AUTH_PROVIDER).useValue(opts.auth)
     .compile();
-  const app = moduleRef.createNestApplication({ logger: false });
+  const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
+  app.useBodyParser("json", { limit: "8kb" }); // [B9] main.ts와 동일
   app.useWebSocketAdapter(new ConfiguredIoAdapter(app, env.CORS_ORIGINS));
   await app.listen(0);
   const url = (await app.getUrl()).replace("[::1]", "127.0.0.1");
@@ -1270,6 +1388,21 @@ export async function createTestApp(opts: { judge: Judge; auth: AuthProvider }):
 }
 ```
 (`tsconfig.build.json`의 `exclude`에 `"src/app/testing/**"` 추가)
+
+`jev-chat-api/src/app/chat/io.adapter.spec.ts`:
+```ts
+import { describe, expect, it } from "vitest";
+import { isAllowedOrigin } from "./io.adapter";
+
+describe("isAllowedOrigin [B5]", () => {
+  const allowed = new Set(["http://localhost:5173"]);
+  it("허용 목록의 Origin만 통과, Origin 없음(비브라우저)은 통과", () => {
+    expect(isAllowedOrigin("http://localhost:5173", allowed)).toBe(true);
+    expect(isAllowedOrigin("http://evil.test", allowed)).toBe(false);
+    expect(isAllowedOrigin(undefined, allowed)).toBe(true);
+  });
+});
+```
 
 `jev-chat-api/src/app/chat/chat.gateway.e2e.spec.ts`:
 ```ts
@@ -1283,6 +1416,7 @@ import { createTestApp } from "../testing/test-app";
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
 const enabled = !!process.env.TEST_DATABASE_URL;
+const ALLOWED_ORIGIN = "http://localhost:5173";
 
 describe.runIf(enabled)("ChatGateway E2E (통합)", () => {
   let url: string;
@@ -1297,7 +1431,7 @@ describe.runIf(enabled)("ChatGateway E2E (통합)", () => {
     const auth = new StaticTokenAuthProvider({
       alice: { userId: "alice", roles: ["user"] },
       bob: { userId: "bob", roles: ["user"] },
-      dbg: { userId: "carol", roles: ["user", "debug"] },
+      admin: { userId: "root", roles: ["user", "debug", "admin"] },
     });
     ({ url, close } = await createTestApp({ judge, auth }));
   });
@@ -1306,8 +1440,14 @@ describe.runIf(enabled)("ChatGateway E2E (통합)", () => {
     await close?.();
   });
 
-  function connect(token: string, protocolVersion = 1): Promise<Client> {
-    const c: Client = io(`${url}/chat`, { auth: { token, protocolVersion }, transports: ["websocket"], reconnection: false, forceNew: true });
+  function connect(token: string, opts: { protocolVersion?: number; origin?: string; transport?: "websocket" | "polling" } = {}): Promise<Client> {
+    const c: Client = io(`${url}/chat`, {
+      auth: { token, protocolVersion: opts.protocolVersion ?? 1 },
+      transports: [opts.transport ?? "websocket"],
+      reconnection: false,
+      forceNew: true,
+      extraHeaders: { origin: opts.origin ?? ALLOWED_ORIGIN },
+    });
     clients.push(c);
     return new Promise((resolve, reject) => {
       c.once("connect", () => resolve(c));
@@ -1315,19 +1455,29 @@ describe.runIf(enabled)("ChatGateway E2E (통합)", () => {
     });
   }
 
+  async function startSession(c: Client, sessionId?: string): Promise<string> {
+    const r = await c.timeout(3000).emitWithAck("session:start", sessionId ? { sessionId } : {});
+    if (!r.ok) throw new Error(r.error.code);
+    return r.data.sessionId;
+  }
+
   it("잘못된 토큰 → connect_error UNAUTHORIZED", async () => {
     await expect(connect("nope")).rejects.toMatchObject({ message: "UNAUTHORIZED" });
   });
 
   it("지원하지 않는 프로토콜 버전 → PROTOCOL_UNSUPPORTED", async () => {
-    await expect(connect("alice", 99)).rejects.toMatchObject({ message: "PROTOCOL_UNSUPPORTED" });
+    await expect(connect("alice", { protocolVersion: 99 })).rejects.toMatchObject({ message: "PROTOCOL_UNSUPPORTED" });
+  });
+
+  it("[B5] 허용되지 않은 Origin은 websocket·polling 모두 연결 거부(유효 토큰이어도)", async () => {
+    await expect(connect("alice", { origin: "http://evil.test", transport: "websocket" })).rejects.toBeTruthy();
+    await expect(connect("alice", { origin: "http://evil.test", transport: "polling" })).rejects.toBeTruthy();
+    await expect(connect("alice", { transport: "polling" })).resolves.toBeTruthy();
   });
 
   it("세션 시작 → 전송 → accepted ack → chat:done(faq)", async () => {
     const c = await connect("alice");
-    const start = await c.timeout(3000).emitWithAck("session:start", {});
-    expect(start.ok).toBe(true);
-    const sessionId = start.ok ? start.data.sessionId : "";
+    const sessionId = await startSession(c);
     const done = new Promise<ChatDoneEvent>((r) => c.once("chat:done", r));
     const ack = await c.timeout(3000).emitWithAck("chat:send", { sessionId, clientMsgId: randomUUID(), text: "법인카드 한도 얼마예요?" });
     expect(ack).toMatchObject({ ok: true, data: { status: "accepted", turnSeq: 1 } });
@@ -1340,19 +1490,24 @@ describe.runIf(enabled)("ChatGateway E2E (통합)", () => {
     expect(r).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
   });
 
-  it("다른 사용자의 세션 접근 → FORBIDDEN", async () => {
+  it("다른 사용자의 세션 접근 → FORBIDDEN, room에도 참여하지 않음", async () => {
     const a = await connect("alice");
-    const start = await a.timeout(3000).emitWithAck("session:start", {});
-    const sessionId = start.ok ? start.data.sessionId : "";
+    const sessionId = await startSession(a);
     const b = await connect("bob");
+    let leaked = false;
+    b.on("chat:done", () => (leaked = true));
     expect(await b.timeout(3000).emitWithAck("session:start", { sessionId })).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
     expect(await b.timeout(3000).emitWithAck("chat:send", { sessionId, clientMsgId: randomUUID(), text: "q" })).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    const done = new Promise((r) => a.once("chat:done", r));
+    await a.timeout(3000).emitWithAck("chat:send", { sessionId, clientMsgId: randomUUID(), text: "법인카드 한도 얼마예요?" });
+    await done;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(leaked).toBe(false);
   });
 
   it("재연결 동기화: 끊긴 동안 완료된 턴을 session:start로 받는다", async () => {
     const c1 = await connect("alice");
-    const start = await c1.timeout(3000).emitWithAck("session:start", {});
-    const sessionId = start.ok ? start.data.sessionId : "";
+    const sessionId = await startSession(c1);
     await c1.timeout(3000).emitWithAck("chat:send", { sessionId, clientMsgId: randomUUID(), text: "법인카드 한도 얼마예요?" });
     c1.close();
     await new Promise((r) => setTimeout(r, 300));
@@ -1361,22 +1516,40 @@ describe.runIf(enabled)("ChatGateway E2E (통합)", () => {
     expect(again.ok && again.data.turns[0]).toMatchObject({ status: "completed", route: "faq" });
   });
 
-  it("debug 권한 소켓만 chat:trace를 받는다", async () => {
-    const d = await connect("dbg");
-    const start = await d.timeout(3000).emitWithAck("session:start", {});
-    const sessionId = start.ok ? start.data.sessionId : "";
-    const trace = new Promise<ChatTraceEvent>((r) => d.once("chat:trace", r));
-    await d.timeout(3000).emitWithAck("chat:send", { sessionId, clientMsgId: randomUUID(), text: "법인카드 한도 얼마예요?" });
-    expect((await trace).trace).toMatchObject({ route: "faq" });
+  it("[B7] 한 소켓의 중복 재전송은 그 소켓에만 결과를 다시 보낸다", async () => {
+    const s1 = await connect("alice");
+    const sessionId = await startSession(s1);
+    const s2 = await connect("alice");
+    await startSession(s2, sessionId);
+    let s2Done = 0;
+    s2.on("chat:done", () => s2Done++);
+    const id = randomUUID();
+    const first = new Promise((r) => s1.once("chat:done", r));
+    await s1.timeout(3000).emitWithAck("chat:send", { sessionId, clientMsgId: id, text: "법인카드 한도 얼마예요?" });
+    await first;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(s2Done).toBe(1); // 원래 완료는 room 전체
+    const replay = new Promise((r) => s1.once("chat:done", r));
+    expect(await s1.timeout(3000).emitWithAck("chat:send", { sessionId, clientMsgId: id, text: "법인카드 한도 얼마예요?" })).toMatchObject({ ok: true, data: { status: "duplicate" } });
+    await replay;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(s2Done).toBe(1); // 재발송은 s2로 가지 않는다
+  });
 
-    const a = await connect("alice");
-    const s2 = await a.timeout(3000).emitWithAck("session:start", {});
-    let gotTrace = false;
-    a.on("chat:trace", () => (gotTrace = true));
-    const done = new Promise((r) => a.once("chat:done", r));
-    await a.timeout(3000).emitWithAck("chat:send", { sessionId: s2.ok ? s2.data.sessionId : "", clientMsgId: randomUUID(), text: "법인카드 한도 얼마예요?" });
+  it("[B8] 같은 세션 room에서 debug 권한 소켓만 trace를 받는다(요청자가 비debug여도)", async () => {
+    const owner = await connect("alice"); // 비debug
+    const sessionId = await startSession(owner);
+    const observer = await connect("admin"); // debug+admin, 같은 세션 관찰
+    await startSession(observer, sessionId);
+    let ownerTrace = false;
+    owner.on("chat:trace", () => (ownerTrace = true));
+    const trace = new Promise<ChatTraceEvent>((r) => observer.once("chat:trace", r));
+    const done = new Promise((r) => owner.once("chat:done", r));
+    await owner.timeout(3000).emitWithAck("chat:send", { sessionId, clientMsgId: randomUUID(), text: "법인카드 한도 얼마예요?" });
     await done;
-    expect(gotTrace).toBe(false);
+    expect((await trace).trace).toMatchObject({ route: "faq" });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(ownerTrace).toBe(false);
   });
 });
 ```
@@ -1390,20 +1563,34 @@ Expected: FAIL — 모듈 없음
 
 `jev-chat-api/src/app/chat/io.adapter.ts`:
 ```ts
+import type { IncomingMessage } from "node:http";
 import type { INestApplicationContext } from "@nestjs/common";
 import { IoAdapter } from "@nestjs/platform-socket.io";
 import type { ServerOptions } from "socket.io";
 
-/** CORS 허용 목록을 env에서 받는 IoAdapter (데코레이터의 정적 옵션 대신) */
+/** [B5] Origin 허용 판정. Origin이 없는 비브라우저 클라이언트(CLI·서버 간)는 토큰 인증만으로 허용한다. */
+export function isAllowedOrigin(origin: string | undefined, allowed: ReadonlySet<string>): boolean {
+  return origin === undefined || allowed.has(origin);
+}
+
+/** CORS(polling)와 handshake Origin(websocket 포함) 허용 목록을 env로 설정하는 IoAdapter */
 export class ConfiguredIoAdapter extends IoAdapter {
+  private readonly allowed: ReadonlySet<string>;
+
   constructor(app: INestApplicationContext, private readonly corsOrigins: string[]) {
     super(app);
+    this.allowed = new Set(corsOrigins);
   }
+
   override createIOServer(port: number, options?: ServerOptions & { namespace?: string }) {
     return super.createIOServer(port, {
       ...options,
       cors: { origin: this.corsOrigins, credentials: false },
       maxHttpBufferSize: 16 * 1024,
+      // CORS는 HTTP long-polling에만 적용된다. WebSocket까지 막으려면 handshake에서 직접 검사한다.
+      allowRequest: (req: IncomingMessage, callback: (err: string | null | undefined, success: boolean) => void) => {
+        callback(null, isAllowedOrigin(req.headers.origin, this.allowed));
+      },
     } as ServerOptions);
   }
 }
@@ -1428,7 +1615,7 @@ import type { Namespace, Socket } from "socket.io";
 import type { AuthedPrincipal, AuthProvider } from "../auth/auth.types";
 import { AUTH_PROVIDER } from "../auth/auth.types";
 import { hasRole } from "../auth/access";
-import { ChatService } from "./chat.service";
+import { ChatService, type ReplyPort } from "./chat.service";
 import type { ChatEvents } from "./chat-events";
 import { ERROR_MESSAGES } from "./turn-mapper";
 
@@ -1437,8 +1624,8 @@ const CHANNEL = "front-test";
 
 type SocketData = { principal: AuthedPrincipal };
 
-function invalid<T>(): Ack<T> {
-  return { ok: false, error: { code: "INVALID_INPUT", message: ERROR_MESSAGES.INVALID_INPUT, retryable: false } };
+function failAck<T>(code: ErrorCode): Ack<T> {
+  return { ok: false, error: { code, message: ERROR_MESSAGES[code], retryable: code === "INTERNAL" } };
 }
 
 function connectError(code: ErrorCode, data: Record<string, unknown> = {}): Error {
@@ -1473,8 +1660,8 @@ export class ChatGateway implements OnGatewayInit {
           socket.once("disconnect", () => clearTimeout(timer));
         }
         next();
-      })().catch((e) => {
-        this.log.error(`인증 처리 오류: ${(e as Error).name}`);
+      })().catch((e: unknown) => {
+        this.log.error(`인증 처리 오류: ${(e as Error)?.name ?? "unknown"}`);
         next(connectError("INTERNAL"));
       });
     });
@@ -1484,14 +1671,14 @@ export class ChatGateway implements OnGatewayInit {
     return (socket.data as SocketData).principal;
   }
 
-  /** room 기반 이벤트 구현. trace는 room 안의 debug 권한 소켓에만 개별 발송한다. */
-  private events(): ChatEvents {
+  /** room 기반 이벤트. [B8] trace는 room 안에서 debug 권한이 있는 소켓에만 개별 발송한다(수신자 기준). */
+  private roomEvents(): ChatEvents {
     return {
       status: (e) => this.server.to(room(e.sessionId)).emit("chat:status", e),
       done: (e) => this.server.to(room(e.sessionId)).emit("chat:done", e),
       error: (e) => this.server.to(room(e.sessionId)).emit("chat:error", e),
       trace: (sessionId: string, e: ChatTraceEvent) => {
-        void this.server
+        this.server
           .in(room(sessionId))
           .fetchSockets()
           .then((sockets) => {
@@ -1499,48 +1686,56 @@ export class ChatGateway implements OnGatewayInit {
               const p = (s.data as SocketData | undefined)?.principal;
               if (p && hasRole(p, "debug")) s.emit("chat:trace", e);
             }
-          });
+          })
+          .catch((err: unknown) => this.log.warn(`trace 발송 실패: ${(err as Error)?.name ?? "unknown"}`));
       },
+    };
+  }
+
+  /** [B7] 요청한 소켓 하나에만 보내는 재발송 포트 */
+  private replyTo(socket: Socket): ReplyPort {
+    return {
+      done: (e) => socket.emit("chat:done", e),
+      error: (e) => socket.emit("chat:error", e),
     };
   }
 
   @SubscribeMessage("session:start")
   async onSessionStart(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown): Promise<Ack<SessionStartResponse>> {
-    if (!isWithinPayloadLimit(body)) return invalid();
-    const parsed = SessionStartRequestSchema.safeParse(body ?? {});
-    if (!parsed.success) return invalid();
-    const res = await this.chat.startSession(this.principal(socket), parsed.data, CHANNEL);
-    if (res.ok) await socket.join(room(res.data.sessionId));
-    return res;
+    try {
+      if (!isWithinPayloadLimit(body)) return failAck("INVALID_INPUT");
+      const parsed = SessionStartRequestSchema.safeParse(body ?? {});
+      if (!parsed.success) return failAck("INVALID_INPUT");
+      // [B3] 서비스가 권한 확인(또는 생성) 뒤 join을 호출하고, 그다음 이력을 조회한다
+      return await this.chat.startSession(this.principal(socket), parsed.data, CHANNEL, async (sid) => {
+        await socket.join(room(sid));
+      });
+    } catch (e) {
+      this.log.error(`session:start 오류: ${(e as Error)?.name ?? "unknown"}`);
+      return failAck("INTERNAL"); // [B1]
+    }
   }
 
   @SubscribeMessage("chat:send")
   async onSend(@ConnectedSocket() socket: Socket, @MessageBody() body: unknown): Promise<Ack<ChatSendResponse>> {
-    if (!isWithinPayloadLimit(body)) return invalid();
-    const parsed = ChatSendRequestSchema.safeParse(body);
-    if (!parsed.success) return invalid();
-    const p = this.principal(socket);
-    // 권한을 먼저 확인한 뒤 room에 참여한다 → 다른 사용자의 세션 이벤트를 받을 수 없다.
-    // (처리 결과 이벤트가 ack보다 먼저 올 수 있으므로 send 호출 전에 참여한다)
-    const denied = await this.chat.authorize(p, parsed.data.sessionId);
-    if (denied) return denied;
-    await socket.join(room(parsed.data.sessionId));
-    return this.chat.send(p, parsed.data, this.events());
+    try {
+      if (!isWithinPayloadLimit(body)) return failAck("INVALID_INPUT");
+      const parsed = ChatSendRequestSchema.safeParse(body);
+      if (!parsed.success) return failAck("INVALID_INPUT");
+      const p = this.principal(socket);
+      // 권한을 먼저 확인한 뒤 room에 참여한다 → 다른 사용자의 세션 이벤트를 받을 수 없다.
+      // (처리 결과 이벤트가 ack보다 먼저 올 수 있으므로 send 호출 전에 참여한다)
+      const denied = await this.chat.authorize(p, parsed.data.sessionId);
+      if (denied) return denied;
+      await socket.join(room(parsed.data.sessionId));
+      return await this.chat.send(p, parsed.data, this.roomEvents(), this.replyTo(socket));
+    } catch (e) {
+      this.log.error(`chat:send 오류: ${(e as Error)?.name ?? "unknown"}`);
+      return failAck("INTERNAL"); // [B1]
+    }
   }
 }
 ```
-
-`ChatService`에 추가:
-```ts
-  /** 세션 접근 권한 확인. 허용이면 null, 아니면 실패 ack */
-  async authorize(p: AuthedPrincipal, sessionId: string): Promise<Ack<never> | null> {
-    const s = await this.deps.store.findSession(sessionId);
-    if (!s) return fail("NOT_FOUND");
-    if (!canAccessSession(p, s.userId)) return fail("FORBIDDEN");
-    return null;
-  }
-```
-그리고 `send()` 앞부분의 세션 조회·권한 확인은 `const denied = await this.authorize(p, req.sessionId); if (denied) return denied;`로 바꾼다(단위 테스트는 그대로 통과해야 한다).
 
 `jev-chat-api/src/app/auth/auth.module.ts`:
 ```ts
@@ -1559,7 +1754,7 @@ export class AuthModule {}
 
 `jev-chat-api/src/app/chat.module.ts`:
 ```ts
-import { Module } from "@nestjs/common";
+import { Logger, Module } from "@nestjs/common";
 import type { Judge } from "../core";
 import { TurnRepository } from "../adapters/persistence/turn.repository";
 import { ChatGateway } from "./chat/chat.gateway";
@@ -1568,6 +1763,8 @@ import { SlidingWindowRateLimiter } from "./chat/rate-limiter";
 import { SessionQueue } from "./chat/session-queue";
 import { JUDGE } from "./jev.module";
 import { SnapshotService } from "./knowledge/snapshot.service";
+
+const chatLog = new Logger("ChatService");
 
 @Module({
   providers: [
@@ -1582,6 +1779,8 @@ import { SnapshotService } from "./knowledge/snapshot.service";
           queue: new SessionQueue({ capacity: 5 }),
           sendLimiter: new SlidingWindowRateLimiter(10, 60_000),
           sessionLimiter: new SlidingWindowRateLimiter(20, 60_000),
+          replayLimiter: new SlidingWindowRateLimiter(30, 60_000),
+          log: (where, err) => chatLog.error(`${where} 실패: ${(err as Error)?.name ?? "unknown"}`),
         }),
     },
     ChatGateway,
@@ -1592,16 +1791,36 @@ export class ChatModule {}
 ```
 
 `app.module.ts`의 `imports`에 `AuthModule`, `ChatModule` 추가.
-`main.ts`에서 `NestFactory.create` 다음 줄에 추가:
+`main.ts`를 다음처럼 바꾼다(Express 앱 타입 + body 8KB 제한[B9] + 소켓 어댑터):
 ```ts
+import "reflect-metadata";
+import "dotenv/config";
+import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
+import { AppModule } from "./app.module";
+import { ConfiguredIoAdapter } from "./chat/io.adapter";
+import { validateEnv } from "./config/env.schema";
+
+async function bootstrap(): Promise<void> {
+  const env = validateEnv(process.env);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(env));
+  app.useBodyParser("json", { limit: "8kb" });
+  app.enableCors({ origin: env.CORS_ORIGINS, credentials: false });
   app.useWebSocketAdapter(new ConfiguredIoAdapter(app, env.CORS_ORIGINS));
+  app.enableShutdownHooks();
+  await app.listen(env.PORT);
+}
+
+void bootstrap();
 ```
-(import: `import { ConfiguredIoAdapter } from "./chat/io.adapter";`)
 
 - [ ] **Step 5: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test && TEST_DATABASE_URL=… pnpm --filter jev-chat-api test -- chat.gateway && pnpm --filter jev-chat-api typecheck`
-Expected: 단위 전체 PASS, E2E 7건 PASS. `afterInit`이 `Namespace`를 받는지 확인되지 않으면(미들웨어가 호출되지 않아 인증 테스트 실패) `server.use` 대신 `handleConnection`에서 검증 후 `socket.emit("connect_error")`가 아닌 `socket.disconnect(true)`로 끊고 테스트를 그 동작에 맞추지 말고 **멈추고 보고**한다(설계 계약 변경 필요).
+Expected: 단위 전체 PASS, E2E 9건 PASS. 다음 경우에는 테스트를 동작에 맞춰 고치지 말고 **멈추고 보고**한다(설계 계약 변경 필요):
+- `afterInit`이 `Namespace`를 받지 않아 미들웨어 인증이 호출되지 않는 경우
+- socket.io 4.8.3에서 `allowRequest`·`extraHeaders(origin)`가 websocket handshake에 적용되지 않아 Origin 테스트가 실패하는 경우
+- `node_modules/socket.io/package.json` 버전이 4.8.3이 아니거나 두 버전이 함께 설치된 경우(`pnpm why socket.io`로 확인)
 
 - [ ] **Step 6: 커밋**
 
@@ -1617,7 +1836,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 5: REST (세션·턴·trace·검수·관리) + HTTP 인증 가드 + 오류 매핑
 
 **Files:**
-- Create: `jev-chat-api/src/app/auth/http-auth.guard.ts`, `jev-chat-api/src/app/rest/{api-error.ts,sessions.controller.ts,traces.controller.ts,admin.controller.ts}`, `jev-chat-api/src/app/rest.module.ts`
+- Create: `jev-chat-api/src/app/auth/http-auth.guard.ts`, `jev-chat-api/src/app/rest/{api-error.ts,all-exceptions.filter.ts,cursor.ts,sessions.controller.ts,traces.controller.ts,admin.controller.ts}`, `jev-chat-api/src/app/rest.module.ts`
 - Create: `jev-chat-api/src/adapters/persistence/review.repository.ts`
 - Modify: `jev-chat-api/src/adapters/persistence/turn.repository.ts`(세션 목록·trace 조회 추가), `jev-chat-api/src/adapters/persistence/knowledge.repository.ts`(목록 조회 추가), `app.module.ts`
 - Test: `jev-chat-api/src/app/rest/rest.e2e.spec.ts`
@@ -1638,7 +1857,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 `jev-chat-api/src/app/rest/rest.e2e.spec.ts`:
 ```ts
 import { randomUUID } from "node:crypto";
-import { AdminConfigSchema, PageSchema, ReviewQueueItemSchema, SessionSummarySchema, TraceDetailSchema } from "@jev-chat/protocol";
+import { AdminConfigSchema, ApiErrorSchema, PageSchema, ReviewQueueItemSchema, SessionSummarySchema, TraceDetailSchema } from "@jev-chat/protocol";
 import { io } from "socket.io-client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FakeJudge, okRelevance, okTurn } from "../../core/testing/fakes";
@@ -1724,6 +1943,16 @@ describe.runIf(enabled)("REST E2E (통합)", () => {
     expect(detail.reviews[0]).toMatchObject({ verdict: "partial", reviewerId: "root" });
   });
 
+  it("[B9] 8KB 초과 body → 413 ApiError, 잘못된 커서 → 400, 없는 경로 → 404 ApiError", async () => {
+    const big = await post(`/api/traces/${traceId}/review`, "admin", { verdict: "wrong", note: "가".repeat(3000) });
+    expect(big.status).toBe(413);
+    expect(ApiErrorSchema.parse(await big.json()).error.code).toBe("INVALID_INPUT");
+    expect((await get("/api/sessions?cursor=not-a-cursor", "admin")).status).toBe(400);
+    const missing = await get("/api/nope", "admin");
+    expect(missing.status).toBe(404);
+    expect(ApiErrorSchema.parse(await missing.json()).error.code).toBe("NOT_FOUND");
+  });
+
   it("관리: config 조회, 지식 목록, 재로드", async () => {
     expect((await get("/api/admin/config", "alice")).status).toBe(403);
     const cfg = AdminConfigSchema.parse(await (await get("/api/admin/config", "admin")).json());
@@ -1733,6 +1962,15 @@ describe.runIf(enabled)("REST E2E (통합)", () => {
     const reload = await post("/api/admin/knowledge/reload", "admin");
     expect(reload.status).toBe(201);
     expect(await reload.json()).toMatchObject({ changed: false });
+  });
+
+  it("[B9] 레이트 리밋 응답 본문은 retryAfterMs를 포함한다", async () => {
+    let last: Response | null = null;
+    for (let i = 0; i < 7; i++) last = await post("/api/admin/knowledge/reload", "admin");
+    expect(last?.status).toBe(429);
+    const body = ApiErrorSchema.parse(await last!.json());
+    expect(body.error).toMatchObject({ code: "RATE_LIMITED" });
+    expect(body.error.retryAfterMs).toBeGreaterThan(0);
   });
 });
 ```
@@ -1800,6 +2038,68 @@ export class HttpAuthGuard implements CanActivate {
 }
 
 export const CurrentPrincipal = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthedPrincipal => ctx.switchToHttp().getRequest<Req>().principal!);
+```
+
+`jev-chat-api/src/app/rest/all-exceptions.filter.ts` [B1][B9]:
+```ts
+import { Catch, HttpException, Logger, type ArgumentsHost, type ExceptionFilter } from "@nestjs/common";
+import type { ErrorCode } from "@jev-chat/protocol";
+import { ERROR_MESSAGES } from "../chat/turn-mapper";
+
+function codeForStatus(status: number): ErrorCode {
+  if (status === 401) return "UNAUTHORIZED";
+  if (status === 403) return "FORBIDDEN";
+  if (status === 404) return "NOT_FOUND";
+  if (status === 429) return "RATE_LIMITED";
+  return status < 500 ? "INVALID_INPUT" : "INTERNAL";
+}
+
+/** 모든 HTTP 오류를 ApiError 형식({ error: { code, message } })으로 통일한다. 스택·내부 메시지는 응답에 넣지 않는다. */
+@Catch()
+export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly log = new Logger("HTTP");
+
+  catch(exception: unknown, host: ArgumentsHost): void {
+    const res = host.switchToHttp().getResponse<{ status(n: number): { json(body: unknown): void } }>();
+    if (exception instanceof HttpException) {
+      const status = exception.getStatus();
+      const body = exception.getResponse();
+      if (typeof body === "object" && body !== null && "error" in body) {
+        res.status(status).json(body);
+        return;
+      }
+      const code = codeForStatus(status);
+      res.status(status).json({ error: { code, message: ERROR_MESSAGES[code] } });
+      return;
+    }
+    // body-parser 오류(413 entity.too.large, 400 JSON 파싱 실패)는 status 속성을 가진다
+    const status = (exception as { status?: unknown })?.status;
+    if (typeof status === "number" && status >= 400 && status < 500) {
+      res.status(status).json({ error: { code: "INVALID_INPUT", message: ERROR_MESSAGES.INVALID_INPUT } });
+      return;
+    }
+    this.log.error(`처리되지 않은 예외: ${(exception as Error)?.name ?? "unknown"}`);
+    res.status(500).json({ error: { code: "INTERNAL", message: ERROR_MESSAGES.INTERNAL } });
+  }
+}
+```
+
+`jev-chat-api/src/app/rest/cursor.ts` [B9]:
+```ts
+import { z } from "zod";
+
+/** 세션·검수 큐 커서: `<ISO 시각>|<uuid>` */
+export const TimeIdCursor = z
+  .string()
+  .max(200)
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z\|[0-9a-f-]{36}$/, "잘못된 커서")
+  .refine((c) => !Number.isNaN(Date.parse(c.split("|")[0]!)), "잘못된 커서");
+
+/** 지식 목록 커서: 청크/FAQ id */
+export const IdCursor = z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/, "잘못된 커서");
+
+/** 관리 API 공유 제한(사용자당 분당 30건) 주입 토큰 */
+export const ADMIN_LIMITER = Symbol("ADMIN_LIMITER");
 ```
 
 - [ ] **Step 4: 저장소 조회 메서드 추가**
@@ -1953,9 +2253,10 @@ import type { AuthedPrincipal } from "../auth/auth.types";
 import { CurrentPrincipal, HttpAuthGuard } from "../auth/http-auth.guard";
 import { toProtocolTurn } from "../chat/turn-mapper";
 import { ApiException } from "./api-error";
+import { TimeIdCursor } from "./cursor";
 
 const ListQuery = z.object({
-  cursor: z.string().max(200).optional(),
+  cursor: TimeIdCursor.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   route: z.enum(["faq", "extractive", "reference", "clarify", "blocked", "fallback", "error"]).optional(),
   intent: z.string().max(30).optional(),
@@ -2003,17 +2304,17 @@ import type { AuthedPrincipal } from "../auth/auth.types";
 import { CurrentPrincipal, HttpAuthGuard, Roles } from "../auth/http-auth.guard";
 import { SlidingWindowRateLimiter } from "../chat/rate-limiter";
 import { ApiException } from "./api-error";
+import { ADMIN_LIMITER, TimeIdCursor } from "./cursor";
 
-const PageQuery = z.object({ cursor: z.string().max(200).optional(), limit: z.coerce.number().int().min(1).max(100).default(20) });
+const PageQuery = z.object({ cursor: TimeIdCursor.optional(), limit: z.coerce.number().int().min(1).max(100).default(20) });
 
 @Controller("api")
 @UseGuards(HttpAuthGuard)
 export class TracesController {
-  private readonly adminLimiter = new SlidingWindowRateLimiter(30, 60_000);
-
   constructor(
     @Inject(TurnRepository) private readonly turns: TurnRepository,
     @Inject(ReviewRepository) private readonly reviews: ReviewRepository,
+    @Inject(ADMIN_LIMITER) private readonly adminLimiter: SlidingWindowRateLimiter,
   ) {}
 
   @Get("traces/:id")
@@ -2060,8 +2361,9 @@ import { CurrentPrincipal, HttpAuthGuard, Roles } from "../auth/http-auth.guard"
 import { SlidingWindowRateLimiter } from "../chat/rate-limiter";
 import { NoActiveKnowledgeError, SnapshotService } from "../knowledge/snapshot.service";
 import { ApiException } from "./api-error";
+import { ADMIN_LIMITER, IdCursor } from "./cursor";
 
-const PageQuery = z.object({ cursor: z.string().max(200).optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
+const PageQuery = z.object({ cursor: IdCursor.optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
 
 @Controller("api")
 @UseGuards(HttpAuthGuard)
@@ -2072,6 +2374,7 @@ export class AdminController {
   constructor(
     @Inject(SnapshotService) private readonly snapshots: SnapshotService,
     @Inject(KnowledgeRepository) private readonly knowledge: KnowledgeRepository,
+    @Inject(ADMIN_LIMITER) private readonly adminLimiter: SlidingWindowRateLimiter,
   ) {}
 
   private activeVersion(): string {
@@ -2105,8 +2408,11 @@ export class AdminController {
   @Post("admin/knowledge/reload")
   @HttpCode(201)
   async reload(@CurrentPrincipal() p: AuthedPrincipal): Promise<ReloadResponse> {
-    const limited = this.reloadLimiter.take(p.userId);
-    if (!limited.ok) throw new ApiException("RATE_LIMITED", limited.retryAfterMs);
+    // 관리 쓰기 공유 제한(분당 30) + 재로드 전용 제한(분당 6)
+    for (const limiter of [this.adminLimiter, this.reloadLimiter]) {
+      const limited = limiter.take(p.userId);
+      if (!limited.ok) throw new ApiException("RATE_LIMITED", limited.retryAfterMs);
+    }
     try {
       return await this.snapshots.reload();
     } catch (e) {
@@ -2134,17 +2440,26 @@ export class AdminController {
 `jev-chat-api/src/app/rest.module.ts`:
 ```ts
 import { Module } from "@nestjs/common";
+import { APP_FILTER } from "@nestjs/core";
 import type { PrismaClient } from "../generated/prisma/client";
 import { ReviewRepository } from "../adapters/persistence/review.repository";
 import { HttpAuthGuard } from "./auth/http-auth.guard";
+import { SlidingWindowRateLimiter } from "./chat/rate-limiter";
 import { PRISMA } from "./persistence.module";
+import { AllExceptionsFilter } from "./rest/all-exceptions.filter";
+import { ADMIN_LIMITER } from "./rest/cursor";
 import { AdminController } from "./rest/admin.controller";
 import { SessionsController } from "./rest/sessions.controller";
 import { TracesController } from "./rest/traces.controller";
 
 @Module({
   controllers: [SessionsController, TracesController, AdminController],
-  providers: [HttpAuthGuard, { provide: ReviewRepository, inject: [PRISMA], useFactory: (p: PrismaClient) => new ReviewRepository(p) }],
+  providers: [
+    HttpAuthGuard,
+    { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    { provide: ADMIN_LIMITER, useValue: new SlidingWindowRateLimiter(30, 60_000) },
+    { provide: ReviewRepository, inject: [PRISMA], useFactory: (p: PrismaClient) => new ReviewRepository(p) },
+  ],
 })
 export class RestModule {}
 ```
@@ -2153,7 +2468,7 @@ export class RestModule {}
 - [ ] **Step 6: 실행 → 통과 확인**
 
 Run: `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test && pnpm typecheck`
-Expected: REST E2E 7건 포함 전부 PASS
+Expected: REST E2E 9건 포함 전부 PASS (레이트 리밋 테스트는 재로드 제한 창을 소진하므로 파일의 **마지막** 테스트로 둔다)
 
 - [ ] **Step 7: 커밋**
 
@@ -2174,7 +2489,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `jev-chat-api/src/adapters/persistence/retention.spec.ts`
 
 **Interfaces:**
-- Produces: `TurnRepository.deleteOlderThan(cutoff: Date): Promise<number>`(세션 lastActiveAt 기준, cascade로 턴·trace·검수 삭제), `RetentionService`(부팅 1분 후 + 24시간마다, `unref` 타이머), CLI `pnpm --filter jev-chat-api eval:export-reviews [출력경로]`(검수 결과 → 6장 평가 항목 스키마 jsonl)
+- Produces: `TurnRepository.deleteOlderThan(cutoff: Date): Promise<{ turns: number; sessions: number }>`([B11] 턴 createdAt 기준으로 processing이 아닌 턴 삭제 → cascade로 trace·검수 삭제, 그 뒤 턴이 없고 lastActiveAt이 cutoff 이전인 세션 삭제), `RetentionService`(부팅 1분 후 + 24시간마다, `unref` 타이머), CLI `pnpm --filter jev-chat-api eval:export-reviews [출력경로]`(검수 결과 → 6장 평가 항목 스키마 jsonl)
 
 - [ ] **Step 1: 실패 테스트 작성**
 
@@ -2191,15 +2506,43 @@ describe.runIf(prisma)("보관 기간 정리 (통합)", () => {
   beforeEach(async () => resetTestDb(prisma!));
   afterAll(async () => prisma?.$disconnect());
 
-  it("마지막 활동이 기준보다 오래된 세션과 그 턴을 삭제한다", async () => {
-    const old = await repo.createSession("u", "t");
-    const recent = await repo.createSession("u", "t");
-    await repo.reserveTurn({ sessionId: old.id, clientMsgId: "00000000-0000-4000-8000-000000000001", userText: "q" });
-    await prisma!.chatSession.update({ where: { id: old.id }, data: { lastActiveAt: new Date("2020-01-01") } });
-    expect(await repo.deleteOlderThan(new Date("2021-01-01"))).toBe(1);
-    expect(await prisma!.chatSession.findUnique({ where: { id: old.id } })).toBeNull();
-    expect(await prisma!.chatTurn.count({ where: { sessionId: old.id } })).toBe(0);
-    expect(await prisma!.chatSession.findUnique({ where: { id: recent.id } })).not.toBeNull();
+  const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const OLD = new Date("2020-01-01");
+  const CUTOFF = new Date("2021-01-01");
+
+  async function completedTurn(sessionId: string, n: number, createdAt?: Date) {
+    const t = await repo.reserveTurn({ sessionId, clientMsgId: uid(n), userText: `q${n}` });
+    const trace = await prisma!.messageTrace.create({
+      data: { turnId: t.id, knowledgeVersionId: uid(900), templateVersion: "v1", route: "faq", bStatus: "skipped", totalInputTokens: 1, data: {} },
+    });
+    await prisma!.messageReview.create({ data: { traceId: trace.id, verdict: "correct", reviewerId: "root" } });
+    await prisma!.chatTurn.update({ where: { id: t.id }, data: { status: "completed", assistantText: "a", route: "faq", ...(createdAt ? { createdAt } : {}) } });
+    return t.id;
+  }
+
+  it("[B11] 턴 단위: 기준보다 오래된 완료 턴과 그 trace·검수를 삭제, 같은 세션의 최근 턴은 유지", async () => {
+    const s = await repo.createSession("u", "t");
+    const oldTurn = await completedTurn(s.id, 1, OLD);
+    const recentTurn = await completedTurn(s.id, 2);
+    expect(await repo.deleteOlderThan(CUTOFF)).toEqual({ turns: 1, sessions: 0 });
+    expect(await prisma!.chatTurn.findUnique({ where: { id: oldTurn } })).toBeNull();
+    expect(await prisma!.messageTrace.count({ where: { turnId: oldTurn } })).toBe(0);
+    expect(await prisma!.chatTurn.findUnique({ where: { id: recentTurn } })).not.toBeNull();
+    expect(await prisma!.messageReview.count()).toBe(1);
+  });
+
+  it("[B6] 오래된 processing 턴은 지우지 않는다, 턴이 모두 지워진 오래된 세션은 삭제", async () => {
+    const busy = await repo.createSession("u", "t");
+    const t = await repo.reserveTurn({ sessionId: busy.id, clientMsgId: uid(10), userText: "q" });
+    await prisma!.chatTurn.update({ where: { id: t.id }, data: { createdAt: OLD } });
+    await prisma!.chatSession.update({ where: { id: busy.id }, data: { lastActiveAt: OLD } });
+    const idle = await repo.createSession("u", "t");
+    await completedTurn(idle.id, 11, OLD);
+    await prisma!.chatSession.update({ where: { id: idle.id }, data: { lastActiveAt: OLD } });
+    expect(await repo.deleteOlderThan(CUTOFF)).toEqual({ turns: 1, sessions: 1 });
+    expect(await prisma!.chatTurn.findUnique({ where: { id: t.id } })).not.toBeNull();
+    expect(await prisma!.chatSession.findUnique({ where: { id: busy.id } })).not.toBeNull();
+    expect(await prisma!.chatSession.findUnique({ where: { id: idle.id } })).toBeNull();
   });
 });
 ```
@@ -2207,18 +2550,17 @@ describe.runIf(prisma)("보관 기간 정리 (통합)", () => {
 - [ ] **Step 2: 실행 → 실패 확인**
 
 Run: `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test -- retention`
-Expected: FAIL — `deleteOlderThan` 없음
+Expected: FAIL — `deleteOlderThan` 없음 (2건)
 
 - [ ] **Step 3: 구현**
 
 `turn.repository.ts`에 추가:
 ```ts
-  /** 마지막 활동이 cutoff 이전인 세션 삭제(턴·trace·검수는 FK cascade). 처리 중 턴이 있는 세션은 건너뛴다. */
-  async deleteOlderThan(cutoff: Date): Promise<number> {
-    const r = await this.prisma.chatSession.deleteMany({
-      where: { lastActiveAt: { lt: cutoff }, turns: { none: { status: "processing" } } },
-    });
-    return r.count;
+  /** [B11] 턴 단위 보관: cutoff 이전에 만들어진 종료된 턴 삭제(trace·검수는 FK cascade) → 빈 오래된 세션 삭제. 처리 중 턴은 지우지 않는다. */
+  async deleteOlderThan(cutoff: Date): Promise<{ turns: number; sessions: number }> {
+    const turns = await this.prisma.chatTurn.deleteMany({ where: { createdAt: { lt: cutoff }, status: { not: "processing" } } });
+    const sessions = await this.prisma.chatSession.deleteMany({ where: { lastActiveAt: { lt: cutoff }, turns: { none: {} } } });
+    return { turns: turns.count, sessions: sessions.count };
   }
 ```
 
@@ -2253,9 +2595,9 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
   async sweep(): Promise<number> {
     const cutoff = new Date(Date.now() - this.env.RETENTION_DAYS * DAY);
     try {
-      const n = await this.turns.deleteOlderThan(cutoff);
-      if (n > 0) this.log.log(`보관 기간(${this.env.RETENTION_DAYS}일) 지난 세션 ${n}건 삭제`);
-      return n;
+      const r = await this.turns.deleteOlderThan(cutoff);
+      if (r.turns + r.sessions > 0) this.log.log(`보관 기간(${this.env.RETENTION_DAYS}일) 정리: 턴 ${r.turns}건, 빈 세션 ${r.sessions}건`);
+      return r.turns;
     } catch (e) {
       this.log.error(`보관 기간 정리 실패: ${(e as Error).name}`);
       return 0;
@@ -2272,37 +2614,10 @@ import { writeFileSync } from "node:fs";
 import { createPrismaClient } from "../adapters/persistence/prisma";
 import { validateEnv } from "../app/config/env.schema";
 
-/** 검수 결과(message_reviews)를 설계 6장 평가 항목 형식 jsonl로 내보낸다. 튜닝용(tune) 후보로만 사용한다. */
-async function main(): Promise<void> {
-  const env = validateEnv(process.env);
-  const out = process.argv[2] ?? "eval-from-reviews.jsonl";
-  const prisma = createPrismaClient({ host: env.DB_HOST, port: env.DB_PORT, user: env.DB_USER, password: env.DB_PASSWORD, database: env.DB_NAME, connectionLimit: 2 });
-  try {
-    const reviews = await prisma.messageReview.findMany({ include: { trace: { include: { turn: true } } }, orderBy: { createdAt: "asc" } });
-    const lines = reviews.map((r) => {
-      const ok = r.verdict === "correct";
-      return JSON.stringify({
-        id: `review-${r.id}`,
-        type: "from_review",
-        turns: [],
-        message: r.trace.turn.userText,
-        expect: {
-          intent: r.expectedIntent ?? r.trace.intent,
-          allowed_outcomes: ok ? [routeToOutcome(r.trace.route)] : ["ANSWER", "REFERENCE", "HOLD"],
-          ...(r.expectedFaqId ? { faq_ids: [r.expectedFaqId] } : ok && r.trace.faqChoice && r.trace.route === "faq" ? { faq_ids: [r.trace.faqChoice] } : {}),
-          ...(Array.isArray(r.expectedChunkIds) ? { acceptable_chunk_ids: r.expectedChunkIds, required_chunk_ids_any: r.expectedChunkIds } : {}),
-          attack_goal: null,
-        },
-      });
-    });
-    writeFileSync(out, lines.join("\n") + (lines.length ? "\n" : ""));
-    console.log(`검수 ${reviews.length}건 → ${out}`);
-  } finally {
-    await prisma.$disconnect();
-  }
-}
+type Outcome = "ANSWER" | "REFERENCE" | "HOLD" | "BLOCK" | "ERROR";
+type SourceLike = { chunkId: string };
 
-function routeToOutcome(route: string): string {
+function routeToOutcome(route: string): Outcome {
   if (route === "faq" || route === "extractive") return "ANSWER";
   if (route === "reference") return "REFERENCE";
   if (route === "blocked") return "BLOCK";
@@ -2310,8 +2625,73 @@ function routeToOutcome(route: string): string {
   return "HOLD";
 }
 
+/**
+ * [B10] 검수 결과를 설계 6장 평가 항목 형식으로 내보낸다(tune 후보 전용).
+ * - 원래 대화 문맥(trace.contextTurnSeqs)과 실제 출처를 복원한다.
+ * - 라벨을 결정할 수 없는 항목(wrong/partial인데 정답 FAQ·청크가 없음)은 needs-labeling 파일로 분리한다.
+ */
+async function main(): Promise<void> {
+  const env = validateEnv(process.env);
+  const out = process.argv[2] ?? "eval-from-reviews.jsonl";
+  const needsLabeling = out.replace(/\.jsonl$/, "") + ".needs-labeling.jsonl";
+  const prisma = createPrismaClient({ host: env.DB_HOST, port: env.DB_PORT, user: env.DB_USER, password: env.DB_PASSWORD, database: env.DB_NAME, connectionLimit: 2 });
+  try {
+    const reviews = await prisma.messageReview.findMany({ include: { trace: { include: { turn: true } } }, orderBy: { createdAt: "asc" } });
+    const ready: string[] = [];
+    const pending: string[] = [];
+    for (const r of reviews) {
+      const turn = r.trace.turn;
+      const data = r.trace.data as { contextTurnSeqs?: number[] };
+      const ctxRows = data.contextTurnSeqs?.length
+        ? await prisma.chatTurn.findMany({ where: { sessionId: turn.sessionId, turnSeq: { in: data.contextTurnSeqs } }, orderBy: { turnSeq: "asc" } })
+        : [];
+      const turns = ctxRows.flatMap((t) => [
+        { role: "user", text: t.userText },
+        { role: "assistant", text: t.assistantText ?? "", sources: ((t.sources as SourceLike[] | null) ?? []).map((s) => s.chunkId) },
+      ]);
+      const shown = ((turn.sources as SourceLike[] | null) ?? []).map((s) => s.chunkId);
+      const outcome = routeToOutcome(r.trace.route);
+      const expectedChunks = Array.isArray(r.expectedChunkIds) ? (r.expectedChunkIds as string[]) : null;
+
+      let expect: Record<string, unknown> | null = null;
+      if (r.verdict === "correct") {
+        expect = {
+          intent: r.expectedIntent ?? r.trace.intent,
+          allowed_outcomes: [outcome],
+          ...(r.trace.route === "faq" && r.trace.faqChoice ? { faq_ids: [r.trace.faqChoice] } : {}),
+          ...(outcome === "ANSWER" || outcome === "REFERENCE" ? { acceptable_chunk_ids: shown, required_chunk_ids_any: shown } : {}),
+          attack_goal: null,
+        };
+      } else if (r.expectedFaqId || expectedChunks) {
+        expect = {
+          intent: r.expectedIntent ?? r.trace.intent,
+          allowed_outcomes: ["ANSWER"],
+          ...(r.expectedFaqId ? { faq_ids: [r.expectedFaqId] } : {}),
+          ...(expectedChunks ? { acceptable_chunk_ids: expectedChunks, required_chunk_ids_any: expectedChunks } : {}),
+          attack_goal: null,
+        };
+      }
+      const item = {
+        id: `review-${r.id}`,
+        type: turns.length > 0 ? "followup" : "from_review",
+        knowledge_version_id: r.trace.knowledgeVersionId,
+        turns,
+        message: turn.userText,
+        ...(expect ? { expect } : { review: { verdict: r.verdict, note: r.note, route: r.trace.route } }),
+      };
+      (expect ? ready : pending).push(JSON.stringify(item));
+    }
+    writeFileSync(out, ready.join("\n") + (ready.length ? "\n" : ""));
+    writeFileSync(needsLabeling, pending.join("\n") + (pending.length ? "\n" : ""));
+    console.log(`검수 ${reviews.length}건 → 평가 후보 ${ready.length}건(${out}), 라벨 필요 ${pending.length}건(${needsLabeling})`);
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 void main();
 ```
+
 `jev-chat-api/package.json` scripts에 `"eval:export-reviews": "tsx src/scripts/export-reviews.ts"` 추가.
 
 `ecosystem.config.js` (루트):
@@ -2353,6 +2733,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ## 완료 조건 (계획 2B)
 - `pnpm test`, `pnpm typecheck`, `pnpm --filter jev-chat-api build` 통과
-- `TEST_DATABASE_URL`로 Gateway E2E 7건·REST E2E 7건·보관 기간 1건을 포함한 통합 테스트 전부 통과(skip 0건 결과를 보고에 기록)
+- `TEST_DATABASE_URL`로 Gateway E2E 9건·REST E2E 9건·보관 기간 2건을 포함한 통합 테스트 전부 통과(skip 0건 결과를 보고에 기록)
+- `pnpm why socket.io` 결과 4.8.3 단일 버전
 - 수동 스모크: 미니 팩 import → `pnpm start:dev` → `socket.io-client`로 접속해 질문 1건 → `chat:done` 수신(가짜가 아닌 **실제 Jev 키**로 1회 확인, 응답 trace의 `jevCalls[].usage`와 `estimatedInputTokens` 비교 기록)
 - 계획 4(front)가 사용할 것: 소켓 이벤트·ack 계약, REST 엔드포인트와 `packages/protocol`의 REST DTO
