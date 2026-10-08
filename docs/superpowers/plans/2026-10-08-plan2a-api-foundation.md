@@ -565,7 +565,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `class JevLimiter` — `constructor(config: LimiterConfig, now?: () => number)`, `acquire(estimatedTokens: number, signal: AbortSignal): Promise<() => void>`, `stats(): { active: number; waiting: number }`
   - `class TypesafeJudge implements Judge` — `constructor(deps: { transport: JevTransport; limiter: JevLimiter; attemptTimeoutMs: number; maxAttempts?: number; now?: () => number; sleep?: (ms: number, signal: AbortSignal) => Promise<void> })`
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/adapters/jev/limiter.spec.ts`:
 ```ts
@@ -936,12 +936,12 @@ describe("TypesafeJudge.judgeRelevance", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- adapters/jev`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 3: 트랜스포트 인터페이스 작성**
+- [x] **Step 3: 트랜스포트 인터페이스 작성**
 
 `jev-chat-api/src/adapters/jev/transport.ts`:
 ```ts
@@ -971,7 +971,7 @@ export interface JevTransport {
 }
 ```
 
-- [ ] **Step 4: SDK 트랜스포트 작성**
+- [x] **Step 4: SDK 트랜스포트 작성**
 
 `jev-chat-api/src/adapters/jev/sdk-transport.ts`:
 ```ts
@@ -1068,7 +1068,7 @@ export class SdkJevTransport implements JevTransport {
 ```
 ※ `state`/`questions`의 `as never`는 SDK의 `const` 제네릭 추론을 우회하기 위한 것이다. payload 형태는 core 템플릿이 보장한다. SDK 타입과 맞지 않아 컴파일 오류가 나면 `as Parameters<TypeSafeClient["systemOne"]>[0]`로 바꾼다.
 
-- [ ] **Step 5: 제한기 작성**
+- [x] **Step 5: 제한기 작성**
 
 `jev-chat-api/src/adapters/jev/limiter.ts`:
 ```ts
@@ -1198,7 +1198,7 @@ export class JevLimiter {
 }
 ```
 
-- [ ] **Step 6: TypesafeJudge 작성**
+- [x] **Step 6: TypesafeJudge 작성**
 
 `jev-chat-api/src/adapters/jev/typesafe-judge.ts`:
 ```ts
@@ -1354,12 +1354,12 @@ export class TypesafeJudge implements Judge {
 }
 ```
 
-- [ ] **Step 7: 실행 → 통과 확인**
+- [x] **Step 7: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck`
 Expected: 전부 PASS, 타입 오류 없음. `sdk-transport.spec.ts`에서 SDK가 가짜 fetch를 정확히 1회 호출하는지 확인됨(재시도 꺼짐).
 
-- [ ] **Step 8: 커밋**
+- [x] **Step 8: 커밋**
 
 ```bash
 git add jev-chat-api pnpm-lock.yaml
