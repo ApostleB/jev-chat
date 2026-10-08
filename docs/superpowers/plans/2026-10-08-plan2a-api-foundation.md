@@ -2448,7 +2448,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     - `listTurns(sessionId: string, opts: { beforeTurnSeq?: number; limit: number }): Promise<{ turns: TurnRow[]; hasMore: boolean }>` (turn_seq 오름차순 반환)
     - `interface TurnRow { id; sessionId; turnSeq; clientMsgId; userText; status: "processing" | "completed" | "failed"; errorCode: string | null; errorRetryable: boolean | null; assistantText: string | null; route: string | null; sources: SourceRef[] | null; traceId: string | null; createdAt: Date }`
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/app/knowledge/snapshot.service.spec.ts`:
 ```ts
@@ -2701,12 +2701,12 @@ describe.runIf(prisma)("TurnRepository (통합)", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- snapshot turn.repository`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 3: 스냅샷 서비스 작성**
+- [x] **Step 3: 스냅샷 서비스 작성**
 
 `jev-chat-api/src/app/knowledge/snapshot.service.ts`:
 ```ts
@@ -2783,7 +2783,7 @@ export class SnapshotService {
 }
 ```
 
-- [ ] **Step 4: 턴 저장소 작성**
+- [x] **Step 4: 턴 저장소 작성**
 
 `jev-chat-api/src/adapters/persistence/turn.repository.ts`:
 ```ts
@@ -2982,7 +2982,7 @@ export class TurnRepository implements ContextReader {
 }
 ```
 
-- [ ] **Step 5: Nest 모듈 조립**
+- [x] **Step 5: Nest 모듈 조립**
 
 `jev-chat-api/src/app/persistence.module.ts`:
 ```ts
@@ -3125,7 +3125,7 @@ export class AppModule implements OnApplicationBootstrap {
 }
 ```
 
-- [ ] **Step 5-1: 앱 전체 DI·라우팅 HTTP 테스트 작성** [P9]
+- [x] **Step 5-1: 앱 전체 DI·라우팅 HTTP 테스트 작성** [P9]
 
 `jev-chat-api/src/app/app.e2e.spec.ts`:
 ```ts
@@ -3180,7 +3180,7 @@ Expected: 스냅샷 9건 PASS, 턴 저장소 통합 11건 PASS, 앱 부팅 1건 
 Run: `pnpm --filter jev-chat-api knowledge:import src/adapters/knowledge/__fixtures__/mini-pack` → `pnpm --filter jev-chat-api start:dev` (별도 터미널) → `curl -s localhost:3000/api/health`
 Expected: import 시 "적재 완료" 출력, health는 `{"status":"ok"}`, 서버 로그에 env 값·키가 출력되지 않음. 확인 후 서버 종료.
 
-- [ ] **Step 8: 커밋**
+- [x] **Step 8: 커밋**
 
 ```bash
 git add jev-chat-api
