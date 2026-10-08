@@ -206,7 +206,7 @@ Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` �
 **Interfaces:**
 - Produces: `EnvSchema`, `type Env = z.infer<typeof EnvSchema>`, `validateEnv(raw: Record<string, unknown>): Env`, `ENV = Symbol("ENV")`(설정 객체 주입 토큰), `AppModule.forRoot(env: Env)`, `HealthController` (`GET /api/health` → `{ status: "ok" }`)
 
-- [ ] **Step 1: 의존성과 설정 파일 갱신**
+- [x] **Step 1: 의존성과 설정 파일 갱신**
 
 `jev-chat-api/package.json`의 `scripts`·`dependencies`·`devDependencies`를 다음으로 교체(기존 항목 포함):
 ```json
@@ -302,7 +302,7 @@ export default async function setup(): Promise<void> {}
 jev-chat-api/src/generated/
 ```
 
-- [ ] **Step 2: 실패 테스트 작성**
+- [x] **Step 2: 실패 테스트 작성**
 
 `jev-chat-api/src/app/config/env.schema.spec.ts`:
 ```ts
@@ -375,12 +375,12 @@ describe("HealthController", () => {
 });
 ```
 
-- [ ] **Step 3: 실행 → 실패 확인**
+- [x] **Step 3: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- env.schema health`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 4: 구현**
+- [x] **Step 4: 구현**
 
 `jev-chat-api/src/app/config/env.schema.ts`:
 ```ts
@@ -530,12 +530,12 @@ DOMAIN_PACK_DIR=domain-pack/hanbit-erp
 RETENTION_DAYS=90
 ```
 
-- [ ] **Step 5: 실행 → 통과 + 전체 회귀 확인**
+- [x] **Step 5: 실행 → 통과 + 전체 회귀 확인**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck`
 Expected: core 테스트 포함 전부 PASS, Vite ESM/CJS 설정 경고가 사라짐, 타입 오류 없음
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add .gitignore pnpm-lock.yaml pnpm-workspace.yaml jev-chat-api

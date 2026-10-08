@@ -25,3 +25,6 @@ pnpm-debug.log*
 
 # 개발용 DB 데이터 (docker volume을 로컬 폴더로 마운트할 경우)
 infra/data/
+
+# Prisma 생성 클라이언트
+jev-chat-api/src/generated/

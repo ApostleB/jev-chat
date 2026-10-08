@@ -3,4 +3,7 @@ packages:
   - jev-chat-api
   - jev-front
 allowBuilds:
+  '@prisma/engines': true
+  '@swc/core': true
   esbuild: true
+  prisma: true

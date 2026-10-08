@@ -5,7 +5,11 @@
     "moduleResolution": "nodenext",
     "types": ["node"],
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "esModuleInterop": true,
+    "isolatedModules": true
   },
   "include": ["src"]
 }
