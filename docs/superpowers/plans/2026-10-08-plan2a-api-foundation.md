@@ -105,7 +105,7 @@ export function needsHelpdesk(policy: Policy, probs: Record<IntentId, number>): 
 ```
 helpdesk도 같은 경계 테스트 추가(`error: 0.3, account_access: 0.2` 이외에 `0.1 + 0.2 + 0.2` 조합으로 0.5 경계).
 
-- [ ] **0-3: DEFAULT_POLICY 깊은 동결**
+- [x] **0-3: DEFAULT_POLICY 깊은 동결**
 
 실패 테스트(`policy.spec.ts` 신규): `expect(Object.isFrozen(DEFAULT_POLICY.deadlines)).toBe(true)` 및 대입 시 TypeError(strict mode).
 구현(`policy.ts`):
