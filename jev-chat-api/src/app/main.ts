@@ -12,4 +12,8 @@ async function bootstrap(): Promise<void> {
   await app.listen(env.PORT);
 }
 
-void bootstrap();
+bootstrap().catch((e: unknown) => {
+  // env 검증 실패 메시지에는 값이 포함되지 않는다(validateEnv가 보장)
+  console.error(e instanceof Error ? e.message : "부팅 실패");
+  process.exit(1);
+});
