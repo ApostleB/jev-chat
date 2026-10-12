@@ -82,4 +82,8 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+main().catch((e: unknown) => {
+  // 오류 이름만 기록한다(DB 오류 메시지에 질문 원문·접속 정보가 섞일 수 있다)
+  console.error(`검수 내보내기 실패: ${e instanceof Error ? e.name : "알 수 없는 오류"}`);
+  process.exitCode = 1;
+});
