@@ -125,6 +125,8 @@ describe("SdkJevTransport", () => {
       { ...base, usage: { input_tokens: 1, output_tokens: 0.2 } },
       { ...base, usage: { input_tokens: -1, output_tokens: 1 } },
       { ...base, usage: { input_tokens: 1, output_tokens: "3" } },
+      { ...base, usage: { input_tokens: 1e20, output_tokens: 1 } },
+      { ...base, usage: { input_tokens: 1, output_tokens: 2147483648 } },
       { ...base, model: "" },
     ];
     for (const body of bad) {
@@ -135,6 +137,11 @@ describe("SdkJevTransport", () => {
     }
     const zero = fakeFetch(200, { ...base, usage: { input_tokens: 0, output_tokens: 0 } });
     await expect(transport(zero.fn).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 })).resolves.toMatchObject({ usage: { inputTokens: 0, outputTokens: 0 } });
+  });
+
+  it("[R4] 토큰 수 상한 2147483647(INT 최대)은 허용", async () => {
+    const max = fakeFetch(200, { model: "jev-1.13.0", answers: {}, usage: { input_tokens: 2147483647, output_tokens: 2147483647 } });
+    await expect(transport(max.fn).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 })).resolves.toMatchObject({ usage: { inputTokens: 2147483647, outputTokens: 2147483647 } });
   });
 
   it("[6-5] SDK 호출에 시도 타임아웃(timeout)을 넘겨 SDK 기본값이 덮지 않게 한다", async () => {

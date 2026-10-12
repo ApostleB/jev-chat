@@ -56,7 +56,9 @@ export function toTransportError(err: unknown, callerSignal: AbortSignal): JevTr
   return null;
 }
 
-const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+/** 토큰 수 상한. DB Int 컬럼(INT, 2^31-1)에 맞춘다. */
+const MAX_TOKEN_COUNT = 2_147_483_647;
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= MAX_TOKEN_COUNT;
 
 /** 200 응답의 형태 검증. 본문·헤더는 메시지에 담지 않는다. answers 내용은 core 파서가 검증한다. */
 function checkShape(res: unknown): { model: string; answers: unknown; usage: { input_tokens: number; output_tokens: number } } {
