@@ -581,7 +581,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - `overallPass` = (항목 ≥ 1) ∧ (합격선 지표 중 `pass === false` 없음) ∧ (`internalFailures === 0`) ∧ (`requireCoverage`면 모든 합격선 지표의 분모 ≥ 1). 실패 사유는 `reasons`에 기록 [E1].
 - provider 실패 항목은 실패로 센다(재실행으로만 교체 가능).
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/eval/score.spec.ts`:
 ```ts
@@ -734,9 +734,9 @@ describe("computeMetrics", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인** — Run: `pnpm --filter jev-chat-api test -- score metrics` → FAIL
+- [x] **Step 2: 실행 → 실패 확인** — Run: `pnpm --filter jev-chat-api test -- score metrics` → FAIL
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 `jev-chat-api/src/eval/score.ts`:
 ```ts
@@ -996,7 +996,7 @@ export function renderMarkdown(meta: RunMeta, m: Metrics, scores: ItemScore[], o
 }
 ```
 
-- [ ] **Step 4: 실행 → 통과 + 커밋**
+- [x] **Step 4: 실행 → 통과 + 커밋**
 
 Run: `pnpm --filter jev-chat-api test -- eval/ && pnpm --filter jev-chat-api typecheck` → PASS
 ```bash
