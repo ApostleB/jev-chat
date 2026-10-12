@@ -1,6 +1,8 @@
 import { Module, type DynamicModule, type OnApplicationBootstrap, Inject } from "@nestjs/common";
 import { KnowledgeRepository } from "../adapters/persistence/knowledge.repository";
 import { TurnRepository } from "../adapters/persistence/turn.repository";
+import { AuthModule } from "./auth/auth.module";
+import { ChatModule } from "./chat.module";
 import { ENV, type Env } from "./config/env.schema";
 import { HealthController } from "./health.controller";
 import { JevModule } from "./jev.module";
@@ -18,7 +20,7 @@ export class AppModule implements OnApplicationBootstrap {
     return {
       module: AppModule,
       global: true,
-      imports: [PersistenceModule, JevModule],
+      imports: [PersistenceModule, JevModule, AuthModule, ChatModule],
       controllers: [HealthController],
       providers: [
         { provide: ENV, useValue: env },

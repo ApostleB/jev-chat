@@ -2,5 +2,5 @@
   "extends": "./tsconfig.json",
   "compilerOptions": { "noEmit": false, "rootDir": "src", "outDir": "dist" },
   "include": ["src"],
-  "exclude": ["src/**/*.spec.ts", "src/core/testing/**", "src/app/chat/in-memory-turn-store.ts"]
+  "exclude": ["src/**/*.spec.ts", "src/core/testing/**", "src/app/chat/in-memory-turn-store.ts", "src/app/testing/**"]
 }

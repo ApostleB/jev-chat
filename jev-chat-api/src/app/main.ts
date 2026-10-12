@@ -1,13 +1,17 @@
 import "reflect-metadata";
 import "dotenv/config";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
+import { ConfiguredIoAdapter } from "./chat/io.adapter";
 import { validateEnv } from "./config/env.schema";
 
 async function bootstrap(): Promise<void> {
   const env = validateEnv(process.env);
-  const app = await NestFactory.create(AppModule.forRoot(env));
+  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(env));
+  app.useBodyParser("json", { limit: "8kb" });
   app.enableCors({ origin: env.CORS_ORIGINS, credentials: false });
+  app.useWebSocketAdapter(new ConfiguredIoAdapter(app, env.CORS_ORIGINS));
   app.enableShutdownHooks();
   await app.listen(env.PORT);
 }

@@ -1338,11 +1338,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `AuthModule`(AUTH_PROVIDER: env.AUTH_MODE=dev → DevAuthProvider), `ChatModule`
   - 테스트 헬퍼 `createTestApp(opts: { judge: Judge; auth: AuthProvider }): Promise<{ app; url; prisma; close }>` (`src/app/testing/test-app.ts`)
 
-- [ ] **Step 1: 의존성 추가**
+- [x] **Step 1: 의존성 추가**
 
 `pnpm --filter jev-chat-api add @nestjs/websockets@12.1.2 @nestjs/platform-socket.io@12.1.2 socket.io@4.8.3` 그리고 `pnpm --filter jev-chat-api add -D socket.io-client@4.8.3`
 
-- [ ] **Step 2: 테스트 앱 헬퍼와 실패 E2E 테스트 작성**
+- [x] **Step 2: 테스트 앱 헬퍼와 실패 E2E 테스트 작성**
 
 `jev-chat-api/src/app/testing/test-app.ts`:
 ```ts
@@ -1556,12 +1556,12 @@ describe.runIf(enabled)("ChatGateway E2E (통합)", () => {
 });
 ```
 
-- [ ] **Step 3: 실행 → 실패 확인**
+- [x] **Step 3: 실행 → 실패 확인**
 
 Run: `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test -- chat.gateway`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 4: IoAdapter·Gateway·모듈 구현**
+- [x] **Step 4: IoAdapter·Gateway·모듈 구현**
 
 `jev-chat-api/src/app/chat/io.adapter.ts`:
 ```ts
@@ -1816,7 +1816,7 @@ async function bootstrap(): Promise<void> {
 void bootstrap();
 ```
 
-- [ ] **Step 5: 실행 → 통과 확인**
+- [x] **Step 5: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test && TEST_DATABASE_URL=… pnpm --filter jev-chat-api test -- chat.gateway && pnpm --filter jev-chat-api typecheck`
 Expected: 단위 전체 PASS, E2E 9건 PASS. 다음 경우에는 테스트를 동작에 맞춰 고치지 말고 **멈추고 보고**한다(설계 계약 변경 필요):
@@ -1824,7 +1824,7 @@ Expected: 단위 전체 PASS, E2E 9건 PASS. 다음 경우에는 테스트를 �
 - socket.io 4.8.3에서 `allowRequest`·`extraHeaders(origin)`가 websocket handshake에 적용되지 않아 Origin 테스트가 실패하는 경우
 - `node_modules/socket.io/package.json` 버전이 4.8.3이 아니거나 두 버전이 함께 설치된 경우(`pnpm why socket.io`로 확인)
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add jev-chat-api pnpm-lock.yaml
