@@ -13,8 +13,9 @@ import { SlidingWindowRateLimiter } from "./rate-limiter";
 
 const chunks = [chunkFixture({ id: "card-1", title: "법인카드 규정", section: "한도", text: "법인카드 1회 사용 한도는 50만 원이다" })];
 const faqs = [faqFixture({ id: "faq-card", summary: "법인카드 1회 한도", variants: ["법인카드 한도 얼마예요"], answer: "1회 50만 원입니다.", sourceChunkId: "card-1" })];
-const alice = { userId: "alice", roles: ["user" as const] };
-const bob = { userId: "bob", roles: ["user" as const] };
+type TestPrincipal = { userId: string; roles: Array<"user" | "debug" | "admin"> };
+const alice: TestPrincipal = { userId: "alice", roles: ["user"] };
+const bob: TestPrincipal = { userId: "bob", roles: ["user"] };
 
 class Recorder implements ChatEvents {
   log: string[] = [];
@@ -53,13 +54,13 @@ function setup(opts: { judge?: Judge; capacity?: number; sendLimit?: number; pol
 const settle = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 const noJoin = async () => {};
 
-async function session(svc: ChatService, p = alice) {
+async function session(svc: ChatService, p: TestPrincipal = alice) {
   const r = await svc.startSession(p, {}, "front-test", noJoin);
   if (!r.ok) throw new Error("session");
   return r.data.sessionId;
 }
 
-const send = (svc: ChatService, p: typeof alice, sessionId: string, text: string, ev = new Recorder(), reply = new Recorder(), clientMsgId = randomUUID()) =>
+const send = (svc: ChatService, p: TestPrincipal, sessionId: string, text: string, ev = new Recorder(), reply = new Recorder(), clientMsgId = randomUUID()) =>
   svc.send(p, { sessionId, clientMsgId, text }, ev, reply);
 
 describe("ChatService", () => {
@@ -81,6 +82,17 @@ describe("ChatService", () => {
     const sid = await session(svc, alice);
     expect(await send(svc, bob, sid, "q")).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
     expect(await send(svc, alice, randomUUID(), "q")).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+  });
+
+  it("[I-1] admin: 타인 세션 chat:send는 FORBIDDEN, session:start(열람)는 허용, 본인 세션 발송은 허용", async () => {
+    const { svc } = setup();
+    const admin: TestPrincipal = { userId: "root", roles: ["user", "admin"] };
+    const sid = await session(svc, alice);
+    expect(await send(svc, admin, sid, "q")).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+    const started = await svc.startSession(admin, { sessionId: sid }, "front-test", noJoin);
+    expect(started).toMatchObject({ ok: true, data: { sessionId: sid } });
+    const own = await session(svc, admin);
+    expect(await send(svc, admin, own, "q")).toMatchObject({ ok: true });
   });
 
   it("[B1] 저장소 조회 예외 → INTERNAL ack(예외를 던지지 않음), 슬롯 누수 없음", async () => {

@@ -2,7 +2,7 @@ import { Controller, Get, Inject, Param, Query, UseGuards } from "@nestjs/common
 import { z } from "zod";
 import type { Page, SessionSummary, Turn } from "@jev-chat/protocol";
 import { TurnRepository } from "../../adapters/persistence/turn.repository";
-import { canAccessSession, hasRole } from "../auth/access";
+import { canReadSession, hasRole } from "../auth/access";
 import type { AuthedPrincipal } from "../auth/auth.types";
 import { CurrentPrincipal, HttpAuthGuard } from "../auth/http-auth.guard";
 import { toProtocolTurn } from "../chat/turn-mapper";
@@ -39,7 +39,7 @@ export class SessionsController {
     if (!q.success) throw new ApiException("INVALID_INPUT");
     const s = await this.turns.findSession(id);
     if (!s) throw new ApiException("NOT_FOUND");
-    if (!canAccessSession(p, s.userId)) throw new ApiException("FORBIDDEN");
+    if (!canReadSession(p, s.userId)) throw new ApiException("FORBIDDEN");
     const page = await this.turns.listTurns(id, { limit: 50, ...(q.data.beforeTurnSeq ? { beforeTurnSeq: q.data.beforeTurnSeq } : {}) });
     return { turns: page.turns.map(toProtocolTurn), hasMore: page.hasMore };
   }

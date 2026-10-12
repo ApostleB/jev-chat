@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DevAuthProvider } from "./dev-auth.provider";
 import { StaticTokenAuthProvider } from "./static-auth.provider";
-import { canAccessSession, hasRole } from "./access";
+import { canReadSession, canWriteSession, hasRole } from "./access";
 
 const TOKEN = "d".repeat(32);
 
@@ -31,10 +31,16 @@ describe("StaticTokenAuthProvider", () => {
 describe("access", () => {
   const alice = { userId: "alice", roles: ["user" as const] };
   const admin = { userId: "root", roles: ["user" as const, "admin" as const] };
-  it("본인 세션만, admin은 전체", () => {
-    expect(canAccessSession(alice, "alice")).toBe(true);
-    expect(canAccessSession(alice, "bob")).toBe(false);
-    expect(canAccessSession(admin, "bob")).toBe(true);
+  it("열람: 본인 세션만, admin은 전체", () => {
+    expect(canReadSession(alice, "alice")).toBe(true);
+    expect(canReadSession(alice, "bob")).toBe(false);
+    expect(canReadSession(admin, "bob")).toBe(true);
+  });
+  it("발송: 본인 세션만, admin도 타인 세션은 불가", () => {
+    expect(canWriteSession(alice, "alice")).toBe(true);
+    expect(canWriteSession(alice, "bob")).toBe(false);
+    expect(canWriteSession(admin, "bob")).toBe(false);
+    expect(canWriteSession(admin, "root")).toBe(true);
   });
   it("hasRole", () => {
     expect(hasRole(alice, "debug")).toBe(false);

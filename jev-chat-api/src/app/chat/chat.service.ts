@@ -9,7 +9,7 @@ import type {
 import { ChatEngine, DEFAULT_POLICY, ExtractiveAnswerer, type EngineResult, type ExecutionSnapshot, type Judge } from "../../core";
 import type { TurnRow } from "../../adapters/persistence/turn.repository";
 import type { AuthedPrincipal } from "../auth/auth.types";
-import { canAccessSession } from "../auth/access";
+import { canReadSession, canWriteSession } from "../auth/access";
 import type { SnapshotService } from "../knowledge/snapshot.service";
 import type { ChatEvents } from "./chat-events";
 import type { SlidingWindowRateLimiter } from "./rate-limiter";
@@ -61,12 +61,12 @@ export class ChatService {
     return this.inflight.size;
   }
 
-  /** 세션 접근 권한. 허용이면 null. [B1] 조회 실패는 INTERNAL */
-  async authorize(p: AuthedPrincipal, sessionId: string): Promise<Ack<never> | null> {
+  /** 세션 접근 권한(read: 본인·admin, write: 본인만). 허용이면 null. [B1] 조회 실패는 INTERNAL */
+  async authorize(p: AuthedPrincipal, sessionId: string, mode: "read" | "write"): Promise<Ack<never> | null> {
     try {
       const s = await this.deps.store.findSession(sessionId);
       if (!s) return fail("NOT_FOUND");
-      if (!canAccessSession(p, s.userId)) return fail("FORBIDDEN");
+      if (!(mode === "write" ? canWriteSession : canReadSession)(p, s.userId)) return fail("FORBIDDEN");
       return null;
     } catch (e) {
       this.log("authorize", e);
@@ -88,7 +88,7 @@ export class ChatService {
         if (!limited.ok) return fail("RATE_LIMITED", limited.retryAfterMs);
         sessionId = (await this.deps.store.createSession(p.userId, channel)).id;
       } else {
-        const denied = await this.authorize(p, sessionId);
+        const denied = await this.authorize(p, sessionId, "read");
         if (denied) return denied;
       }
       await join(sessionId);
@@ -110,7 +110,7 @@ export class ChatService {
   }
 
   async send(p: AuthedPrincipal, req: ChatSendRequest, events: ChatEvents, reply: ReplyPort): Promise<Ack<ChatSendResponse>> {
-    const denied = await this.authorize(p, req.sessionId);
+    const denied = await this.authorize(p, req.sessionId, "write");
     if (denied) return denied;
     try {
       return await this.deps.queue.withLock(req.sessionId, async () => {

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ReviewRequestSchema, type Page, type Review, type ReviewQueueItem, type Route, type TraceDetail } from "@jev-chat/protocol";
 import { ReviewRepository } from "../../adapters/persistence/review.repository";
 import { TurnRepository } from "../../adapters/persistence/turn.repository";
-import { canAccessSession } from "../auth/access";
+import { canReadSession } from "../auth/access";
 import type { AuthedPrincipal } from "../auth/auth.types";
 import { CurrentPrincipal, HttpAuthGuard, Roles } from "../auth/http-auth.guard";
 import { SlidingWindowRateLimiter } from "../chat/rate-limiter";
@@ -26,7 +26,7 @@ export class TracesController {
   async trace(@CurrentPrincipal() p: AuthedPrincipal, @Param("id") id: string): Promise<TraceDetail> {
     const t = z.uuid().safeParse(id).success ? await this.turns.findTrace(id) : null;
     if (!t) throw new ApiException("NOT_FOUND");
-    if (!canAccessSession(p, t.sessionUserId)) throw new ApiException("FORBIDDEN");
+    if (!canReadSession(p, t.sessionUserId)) throw new ApiException("FORBIDDEN");
     return { id: t.id, turnId: t.turnId, sessionId: t.sessionId, route: t.route as Route, createdAt: t.createdAt.toISOString(), data: t.data, reviews: await this.reviews.listByTrace(t.id) };
   }
 

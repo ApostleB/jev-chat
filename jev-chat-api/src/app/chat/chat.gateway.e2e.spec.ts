@@ -97,6 +97,14 @@ describe.runIf(enabled)("ChatGateway E2E (통합)", () => {
     expect(leaked).toBe(false);
   });
 
+  it("[I-1] admin은 타인 세션을 session:start로 열람할 수 있지만 chat:send는 FORBIDDEN", async () => {
+    const a = await connect("alice");
+    const sessionId = await startSession(a);
+    const admin = await connect("admin");
+    expect(await admin.timeout(3000).emitWithAck("session:start", { sessionId })).toMatchObject({ ok: true, data: { sessionId } });
+    expect(await admin.timeout(3000).emitWithAck("chat:send", { sessionId, clientMsgId: randomUUID(), text: "q" })).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+  });
+
   it("재연결 동기화: 끊긴 동안 완료된 턴을 session:start로 받는다", async () => {
     const c1 = await connect("alice");
     const sessionId = await startSession(c1);
