@@ -149,6 +149,8 @@ chat:send → 인증·권한·zod 검증
 | Jev 장애·엔진 기한 (규칙 1, 8) | `error` | `completed` (장애 안내도 하나의 답변) | `chat:done` (route=error, retryable 표시) |
 | 큐 대기 초과 | — | `failed` (`QUEUE_TIMEOUT`) | `chat:error` |
 | 완료 저장 실패 | — | `failed` (`INTERNAL`) — 별도 트랜잭션으로 기록 시도 | `chat:error` |
+
+- 저장 기한: 앱의 모든 DB 연결에 `innodb_lock_wait_timeout=2`(커넥터 initSql)를 걸어 행 잠금 대기를 2초로 제한하고, `save_ms`는 3000 이상(잠금 대기 + 롤백 여유)으로 검증한다. Prisma 트랜잭션 timeout은 진행 중 쿼리를 취소하지 않으므로 DB 측 잠금 대기 제한이 실제 상한이다.
 | failed 기록마저 실패 | — | `processing` 잔존 → 재시작 sweep 또는 stale 감지로 `failed` | (재연결 동기화 시 반영) |
 | 서버 재시작 | — | `processing` → `failed` (`RESTARTED`, retryable) | (재연결 동기화 시 반영) |
 

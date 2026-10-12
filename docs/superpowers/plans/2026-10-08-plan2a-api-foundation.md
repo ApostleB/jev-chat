@@ -2054,7 +2054,7 @@ export const PolicySchema = z.object({
   // [P8] 대화 문맥은 축소하지 않으므로 안전한 상한을 둔다
   context: z.object({ max_turns: PosInt.max(3), assistant_max_chars: PosInt.max(500) }),
   // [P10] 제한기 대기(limiter_ms)는 서버 설정(JEV_LIMITER_WAIT_MS)이라 팩에 두지 않는다
-  deadlines: z.object({ engine_ms: PosInt, queue_ms: PosInt, save_ms: PosInt.min(1000, "save_ms는 1000 이상(트랜잭션 대기+실행 분할 하한)") }).strict(),
+  deadlines: z.object({ engine_ms: PosInt, queue_ms: PosInt, save_ms: PosInt.min(3000, "save_ms는 3000 이상(DB 잠금 대기 2초 + 롤백 여유)") }).strict(),
 });
 
 export const IntentsSchema = z
@@ -2907,7 +2907,7 @@ export class TurnRepository implements ContextReader {
    * 기한을 넘기면 Prisma가 트랜잭션을 롤백하고 예외를 던진다 — 호출자는 결과를 확인한 뒤에만 이벤트를 보낸다.
    */
   private txOptions(saveMs = 3000): { maxWait: number; timeout: number } {
-    // saveMs는 팩 검증에서 1000 이상이 보장된다. 합계(maxWait+timeout)가 saveMs를 넘지 않게 나눈다.
+    // saveMs는 팩 검증에서 3000 이상이 보장된다(연결별 innodb_lock_wait_timeout=2와 정합). 합계(maxWait+timeout)가 saveMs를 넘지 않게 나눈다.
     const budget = Math.max(1000, saveMs);
     const maxWait = Math.min(1000, Math.floor(budget / 3));
     return { maxWait, timeout: budget - maxWait };
