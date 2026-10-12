@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, errorText } from "@/lib/api";
+import { turnErrorText } from "@/lib/turn-error-text";
 import { INTENT_IDS } from "@/lib/intents";
 import { useCursorList } from "@/lib/use-cursor-list";
 import { TraceSheet } from "./TraceSheet";
@@ -83,6 +84,11 @@ export function LogsPage({ enabled, authEpoch }: { enabled: boolean; authEpoch: 
                 <li key={t.clientMsgId} className="space-y-1 rounded border p-2">
                   <div className="whitespace-pre-wrap">{t.userText}</div>
                   {t.assistantText !== undefined && <div className="whitespace-pre-wrap text-muted-foreground">{t.assistantText}</div>}
+                  {t.error && (
+                    <div className="text-xs text-destructive">
+                      {turnErrorText(t.error.code)} <span className="text-[10px] text-muted-foreground">{t.error.code}</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary">{t.status}</Badge>
                     {t.route && <Badge variant="outline">{t.route}</Badge>}

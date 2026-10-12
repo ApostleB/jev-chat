@@ -1,12 +1,13 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { turnErrorText } from "@/lib/turn-error-text";
 import type { UiTurn } from "@/lib/turns";
 
 const STAGE: Record<string, string> = { queued: "대기 중", judging: "판단 중", answering: "답변 작성 중" };
 
-function problemOf(t: UiTurn): { message: string; retryable: boolean } | null {
+function problemOf(t: UiTurn): { message: string; code?: string; retryable: boolean } | null {
   if (t.sendError) return { message: t.sendError.message, retryable: t.sendError.retryable };
-  if (t.error && (t.status === "failed" || t.route === "error")) return { message: t.error.code, retryable: t.error.retryable };
+  if (t.error && (t.status === "failed" || t.route === "error")) return { message: turnErrorText(t.error.code), code: t.error.code, retryable: t.error.retryable };
   return null;
 }
 
@@ -44,6 +45,7 @@ export function ChatThread({ turns, onRetry, onSelect }: { turns: UiTurn[]; onRe
             {problem && (
               <div className="flex items-center gap-2 text-xs text-destructive">
                 <span>{problem.message}</span>
+                {problem.code && <span className="text-[10px] text-muted-foreground">{problem.code}</span>}
                 {problem.retryable && alreadyRetried && <span className="text-muted-foreground">다시 보냄</span>}
                 {problem.retryable && !alreadyRetried && <Button size="sm" variant="outline" onClick={() => onRetry(t)}>다시 보내기</Button>}
               </div>

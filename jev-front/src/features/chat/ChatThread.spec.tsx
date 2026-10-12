@@ -38,6 +38,11 @@ describe("ChatThread", () => {
     render(<ChatThread turns={[t({ stage: "judging" })]} onRetry={() => {}} onSelect={() => {}} />);
     expect(screen.getByText(/판단 중/)).toBeTruthy();
   });
+  it("[S3] 실패 턴은 코드 원문 대신 한국어 안내를 보이고 코드는 보조 텍스트로 남긴다", () => {
+    render(<ChatThread turns={[t({ status: "failed", error: { code: "RESTARTED", retryable: true } })]} onRetry={() => {}} onSelect={() => {}} />);
+    expect(screen.getByText("서버가 다시 시작되어 처리가 중단되었습니다.")).toBeTruthy();
+    expect(screen.getByText("RESTARTED")).toBeTruthy();
+  });
   describe("[S2] 이미 다시 보낸 실패 턴", () => {
     const failed = t({ status: "failed", error: { code: "RESTARTED", retryable: true } });
     it("retryOfTurnSeq가 이 턴의 turnSeq인 턴이 있으면 버튼을 숨기고 '다시 보냄'을 표시한다", () => {

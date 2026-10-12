@@ -122,6 +122,19 @@ describe("LogsPage", () => {
     expect(within(dialog).queryByRole("textbox")).toBeNull();
   });
 
+  it("[S3] failed 턴은 오류 코드를 한국어 안내로 보여준다", async () => {
+    stubRest((u) => {
+      if (u.pathname === "/api/sessions") return { status: 200, body: { items: [session(SID, "2026-10-12T00:00:00Z", "2026-10-12T00:01:00Z")], nextCursor: null } };
+      if (u.pathname === `/api/sessions/${SID}/turns`) {
+        return { status: 200, body: { turns: [{ turnId: "t1", turnSeq: 1, clientMsgId: uuid(101), userText: "질문 1", status: "failed", error: { code: "RESTARTED", retryable: true } }], hasMore: false } };
+      }
+      return undefined;
+    });
+    renderWithQuery(<LogsPage enabled authEpoch={0} />);
+    await userEvent.click(await screen.findByRole("button", { name: /u1/ }));
+    expect(await screen.findByText("서버가 다시 시작되어 처리가 중단되었습니다.")).toBeTruthy();
+  });
+
   it("trace 조회가 403이면 서랍에 권한 안내를 보여준다", async () => {
     stubRest((u) => {
       if (u.pathname === "/api/sessions") return { status: 200, body: { items: [session(SID, "2026-10-12T00:00:00Z", "2026-10-12T00:01:00Z")], nextCursor: null } };
