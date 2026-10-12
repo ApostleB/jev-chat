@@ -15,7 +15,7 @@ import type { Namespace, Socket } from "socket.io";
 import type { AuthedPrincipal, AuthProvider } from "../auth/auth.types";
 import { AUTH_PROVIDER } from "../auth/auth.types";
 import { hasRole } from "../auth/access";
-import { armExpiry } from "../auth/expiry";
+import { armExpiry, type ArmedExpiry } from "../auth/expiry";
 import { ChatService, type ReplyPort } from "./chat.service";
 import type { ChatEvents } from "./chat-events";
 import { ERROR_MESSAGES } from "./turn-mapper";
@@ -50,17 +50,35 @@ export class ChatGateway implements OnGatewayInit {
         if (!(SUPPORTED_PROTOCOL_VERSIONS as readonly unknown[]).includes(protocolVersion)) {
           return next(connectError("PROTOCOL_UNSUPPORTED", { supported: SUPPORTED_PROTOCOL_VERSIONS }));
         }
+        // 종료 감지는 Engine.IO 전송 상태/close로 한다. 미들웨어 단계의 socket.disconnected는
+        // 정상 연결에서도 true다(Socket.IO는 미들웨어 성공 뒤에야 connected로 바꾼다).
+        let transportClosed = socket.conn?.readyState === "closed" || socket.conn?.readyState === "closing";
+        let expiry: ArmedExpiry | null = null;
+        const teardown = () => {
+          socket.conn?.off("close", onTransportClose);
+          socket.off("disconnect", teardown);
+          if (expiry?.ok) expiry.cancel();
+        };
+        const onTransportClose = () => {
+          transportClosed = true;
+          teardown();
+        };
+        socket.conn?.once("close", onTransportClose); // verify 대기 중 종료도 잡는다
+        socket.once("disconnect", teardown); // 연결 후 종료
         const principal = typeof token === "string" ? await this.auth.verify(token) : null;
-        if (!principal) return next(connectError("UNAUTHORIZED"));
+        if (!principal) {
+          teardown();
+          return next(connectError("UNAUTHORIZED"));
+        }
         (socket.data as SocketData).principal = principal;
-        const expiry = armExpiry(principal.expiresAt, () => socket.disconnect(true));
-        if (!expiry.ok) return next(connectError("UNAUTHORIZED")); // 숫자가 아니거나 유한하지 않음 / 이미 만료
-        // 인증(await) 도중 연결이 끊겼으면 타이머를 남기지 않는다. 이후 종료에서도 해제한다.
-        if (socket.disconnected || socket.conn?.readyState === "closed" || socket.conn?.readyState === "closing") {
-          expiry.cancel(); // socket.io는 닫힌 연결의 next()를 무시한다
-        } else {
-          socket.once("disconnect", expiry.cancel);
-          socket.conn?.once("close", expiry.cancel);
+        if (transportClosed) {
+          teardown(); // 인증 도중 끊겼다 — 타이머를 만들지 않는다(socket.io는 닫힌 연결의 next()를 무시한다)
+          return next();
+        }
+        expiry = armExpiry(principal.expiresAt, () => socket.disconnect(true));
+        if (!expiry.ok) {
+          teardown();
+          return next(connectError("UNAUTHORIZED")); // 숫자가 아니거나 유한하지 않음 / 이미 만료
         }
         next();
       })().catch((e: unknown) => {
