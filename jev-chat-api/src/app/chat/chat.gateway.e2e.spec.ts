@@ -62,8 +62,11 @@ describe.runIf(enabled)("ChatGateway E2E (통합)", () => {
   });
 
   it("[B5] 허용되지 않은 Origin은 websocket·polling 모두 연결 거부(유효 토큰이어도)", async () => {
-    await expect(connect("alice", { origin: "http://evil.test", transport: "websocket" })).rejects.toBeTruthy();
-    await expect(connect("alice", { origin: "http://evil.test", transport: "polling" })).rejects.toBeTruthy();
+    // 거부는 전송 계층(HTTP 403 handshake)에서 일어난다 — 인증 오류(connect_error UNAUTHORIZED)가 아니다
+    await expect(connect("alice", { origin: "http://evil.test", transport: "websocket" })).rejects.toMatchObject({ type: "TransportError", message: "websocket error" });
+    const poll = await connect("alice", { origin: "http://evil.test", transport: "polling" }).catch((e: unknown) => e);
+    expect(poll).toMatchObject({ type: "TransportError", message: "xhr poll error", description: 403 });
+    expect((poll as { data?: unknown }).data).toBeUndefined();
     await expect(connect("alice", { transport: "polling" })).resolves.toBeTruthy();
   });
 
@@ -103,6 +106,20 @@ describe.runIf(enabled)("ChatGateway E2E (통합)", () => {
     const admin = await connect("admin");
     expect(await admin.timeout(3000).emitWithAck("session:start", { sessionId })).toMatchObject({ ok: true, data: { sessionId } });
     expect(await admin.timeout(3000).emitWithAck("chat:send", { sessionId, clientMsgId: randomUUID(), text: "q" })).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
+  });
+
+  it("[M-8] 8KB 초과 페이로드는 필드가 유효해도 INVALID_INPUT으로 거부하고 턴을 만들지 않는다", async () => {
+    const c = await connect("alice");
+    const sessionId = await startSession(c);
+    let done = 0;
+    c.on("chat:done", () => done++);
+    const padded = { sessionId, clientMsgId: randomUUID(), text: "법인카드 한도 얼마예요?", pad: "a".repeat(9000) };
+    expect(await c.timeout(3000).emitWithAck("chat:send", padded as never)).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+    expect(await c.timeout(3000).emitWithAck("session:start", { pad: "a".repeat(9000) } as never)).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(done).toBe(0);
+    const again = await c.timeout(3000).emitWithAck("session:start", { sessionId });
+    expect(again.ok && again.data.turns).toEqual([]); // 거부된 요청으로 턴이 생기지 않았다
   });
 
   it("재연결 동기화: 끊긴 동안 완료된 턴을 session:start로 받는다", async () => {
