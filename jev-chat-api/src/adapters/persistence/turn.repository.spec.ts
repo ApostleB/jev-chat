@@ -201,4 +201,24 @@ describe.runIf(prisma)("TurnRepository (통합)", () => {
     expect(older).toMatchObject({ hasMore: false });
     expect(older.turns.map((t) => t.turnSeq)).toEqual([1]);
   });
+
+  it("[I-3] 세션 목록은 created_at,id 순 — 페이지 사이에 앞 세션에 턴이 추가돼도 중복·누락 없다", async () => {
+    const ids: string[] = [];
+    for (let n = 1; n <= 5; n++) {
+      const id = uuid(n);
+      // 4·5번은 created_at 동률(id로 타이브레이크)
+      await prisma!.chatSession.create({ data: { id, userId: "u1", channel: "front-test", createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, n >= 5 ? 4 : n)) } });
+      ids.push(id);
+    }
+    const first = await repo.listSessions({}, { limit: 2 });
+    expect(first.items.map((s) => s.id)).toEqual([uuid(5), uuid(4)]);
+    // 아직 보지 않은 뒤쪽 세션과 이미 본 앞쪽 세션 모두에 턴을 추가해 lastActiveAt을 흔든다
+    await repo.reserveTurn({ sessionId: uuid(5), clientMsgId: uuid(101), userText: "a" });
+    await repo.reserveTurn({ sessionId: uuid(1), clientMsgId: uuid(102), userText: "b" });
+    const second = await repo.listSessions({}, { limit: 2, cursor: first.nextCursor! });
+    const third = await repo.listSessions({}, { limit: 2, cursor: second.nextCursor! });
+    expect([...first.items, ...second.items, ...third.items].map((s) => s.id)).toEqual([uuid(5), uuid(4), uuid(3), uuid(2), uuid(1)]);
+    expect(third.nextCursor).toBeNull();
+    expect(first.items[0]?.lastActiveAt).toBeTruthy();
+  });
 });

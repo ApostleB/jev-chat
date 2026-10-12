@@ -212,10 +212,10 @@ export class TurnRepository implements ContextReader {
           ? { turns: { some: { ...(filter.route ? { route: filter.route } : {}), ...(filter.intent ? { trace: { intent: filter.intent } } : {}) } } }
           : {}),
         ...(cursorAt && cursorId
-          ? { OR: [{ lastActiveAt: { lt: new Date(cursorAt) } }, { lastActiveAt: new Date(cursorAt), id: { lt: cursorId } }] }
+          ? { OR: [{ createdAt: { lt: new Date(cursorAt) } }, { createdAt: new Date(cursorAt), id: { lt: cursorId } }] }
           : {}),
       },
-      orderBy: [{ lastActiveAt: "desc" }, { id: "desc" }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: page.limit + 1,
       include: { _count: { select: { turns: true } } },
     });
@@ -225,7 +225,7 @@ export class TurnRepository implements ContextReader {
       items: items.map((s) => ({
         id: s.id, userId: s.userId, channel: s.channel, createdAt: s.createdAt.toISOString(), lastActiveAt: s.lastActiveAt.toISOString(), turnCount: s._count.turns,
       })),
-      nextCursor: rows.length > page.limit && last ? `${last.lastActiveAt.toISOString()}|${last.id}` : null,
+      nextCursor: rows.length > page.limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,
     };
   }
 
