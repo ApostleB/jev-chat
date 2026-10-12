@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useChat } from "@/hooks/use-chat";
 import type { IoFactory } from "@/lib/chat-client";
+import { markAuthChanged } from "@/lib/auth-generation";
 import { clearSessionId } from "@/lib/session-store";
 import { clearToken, getToken, setToken } from "@/lib/token-store";
 import { ChatPage } from "@/features/chat/ChatPage";
@@ -25,7 +26,8 @@ export function App({ ioFactory }: { ioFactory?: IoFactory } = {}) {
 
   /** [U6] 인증이 바뀌면 진행 중 요청 취소 → 캐시 비움 → 세대 증가(채팅 연결 교체, 페이지 상태 초기화) */
   const resetAuth = () => {
-    void queryClient.cancelQueries();
+    markAuthChanged(); // [F2] 진행 중 mutation의 늦은 UI 콜백 차단
+    void queryClient.cancelQueries(); // signal이 fetch까지 전달되어 실제 요청이 abort된다
     queryClient.clear();
     setAuthEpoch((e) => e + 1);
   };

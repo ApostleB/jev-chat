@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { KnowledgeChunkItemSchema, KnowledgeFaqItemSchema, ReloadResponseSchema } from "@jev-chat/protocol";
 import { toast } from "sonner";
+import { captureAuthGeneration } from "@/lib/auth-generation";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -55,8 +56,13 @@ function ChunkTab({ enabled, authEpoch }: { enabled: boolean; authEpoch: number 
 export function KnowledgePage({ enabled, authEpoch }: { enabled: boolean; authEpoch: number }) {
   const reload = useMutation({
     mutationFn: () => api.post("/api/admin/knowledge/reload", undefined, ReloadResponseSchema),
-    onSuccess: (r) => toast(r.changed ? "새 버전을 적용했습니다." : "변경 사항이 없습니다."),
-    onError: (e) => toast.error(errorText(e)),
+    onMutate: () => ({ isCurrent: captureAuthGeneration() }),
+    onSuccess: (r, _v, ctx) => {
+      if (ctx?.isCurrent()) toast(r.changed ? "새 버전을 적용했습니다." : "변경 사항이 없습니다."); // [F2] 인증 세대가 지났으면 무시
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.isCurrent()) toast.error(errorText(e));
+    },
   });
   if (!enabled) return <p className="p-6 text-sm">토큰을 먼저 입력하세요.</p>;
   return (

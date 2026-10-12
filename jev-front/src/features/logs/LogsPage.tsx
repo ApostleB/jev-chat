@@ -24,7 +24,7 @@ export function LogsPage({ enabled, authEpoch }: { enabled: boolean; authEpoch: 
   const turns = useInfiniteQuery({
     queryKey: ["turns", authEpoch, sid],
     initialPageParam: null as number | null,
-    queryFn: ({ pageParam }) => api.get(`/api/sessions/${encodeURIComponent(sid!)}/turns${pageParam ? `?beforeTurnSeq=${pageParam}` : ""}`, TurnPageSchema),
+    queryFn: ({ pageParam, signal }) => api.get(`/api/sessions/${encodeURIComponent(sid!)}/turns${pageParam ? `?beforeTurnSeq=${pageParam}` : ""}`, TurnPageSchema, { signal }),
     getNextPageParam: (last) => (last.hasMore ? (last.nextBeforeTurnSeq ?? undefined) : undefined),
     enabled: enabled && !!sid,
   });

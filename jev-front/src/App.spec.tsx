@@ -92,3 +92,25 @@ describe("App 셸", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("설정");
   });
 });
+
+describe("App — 로그아웃 시 진행 중 요청 abort [F2]", () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    vi.unstubAllGlobals();
+  });
+  it("지연된 /api/admin/config fetch의 signal이 로그아웃 때 aborted", async () => {
+    sockets.length = 0;
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+      if (new URL(url).pathname === "/api/admin/config" && init?.signal) signals.push(init.signal);
+      return new Promise(() => {});
+    }));
+    sessionStorage.setItem("jev-chat.token", "t");
+    renderApp();
+    await userEvent.click(screen.getByRole("button", { name: "설정" }));
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    expect(signals[0]!.aborted).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "로그아웃" }));
+    expect(signals[0]!.aborted).toBe(true);
+  });
+});

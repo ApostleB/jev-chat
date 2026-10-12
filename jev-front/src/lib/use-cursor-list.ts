@@ -9,11 +9,11 @@ export function useCursorList<T>(opts: { key: string; authEpoch: number; path: s
   const q = useInfiniteQuery({
     queryKey: [key, authEpoch, path, params],
     initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => {
+    queryFn: ({ pageParam, signal }) => {
       const qs = new URLSearchParams(params);
       if (pageParam) qs.set("cursor", pageParam);
       const s = qs.toString();
-      return api.get(s ? `${path}?${s}` : path, PageSchema(item));
+      return api.get(s ? `${path}?${s}` : path, PageSchema(item), { signal });
     },
     getNextPageParam: (last) => last.nextCursor,
     enabled,

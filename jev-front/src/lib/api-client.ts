@@ -8,6 +8,11 @@ export class ApiRequestError extends Error {
   }
 }
 
+export interface RequestOpts {
+  /** [F2] TanStack Query의 queryFn signal — 취소 시 실제 fetch를 abort한다 */
+  signal?: AbortSignal;
+}
+
 export class ApiClient {
   constructor(
     private readonly baseUrl: string,
@@ -15,21 +20,22 @@ export class ApiClient {
     private readonly fetchImpl: typeof fetch = (...a) => fetch(...a),
   ) {}
 
-  get<T>(path: string, schema: z.ZodType<T>): Promise<T> {
-    return this.request("GET", path, undefined, schema);
+  get<T>(path: string, schema: z.ZodType<T>, opts: RequestOpts = {}): Promise<T> {
+    return this.request("GET", path, undefined, schema, opts);
   }
 
-  post<T>(path: string, body: unknown, schema: z.ZodType<T>): Promise<T> {
-    return this.request("POST", path, body, schema);
+  post<T>(path: string, body: unknown, schema: z.ZodType<T>, opts: RequestOpts = {}): Promise<T> {
+    return this.request("POST", path, body, schema, opts);
   }
 
-  private async request<T>(method: string, path: string, body: unknown, schema: z.ZodType<T>): Promise<T> {
+  private async request<T>(method: string, path: string, body: unknown, schema: z.ZodType<T>, opts: RequestOpts): Promise<T> {
     const token = this.getToken();
     if (!token) throw new ApiRequestError(401, "UNAUTHORIZED", "접속 토큰을 먼저 입력하세요.");
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
       headers: { authorization: `Bearer ${token}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
     const json: unknown = await res.json().catch(() => null);
     if (!res.ok) {

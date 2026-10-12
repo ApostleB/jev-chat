@@ -10,7 +10,7 @@ const VERDICT: Record<string, string> = { correct: "맞음", wrong: "틀림", pa
 export function TraceSheet({ traceId, authEpoch, onClose }: { traceId: string | null; authEpoch: number; onClose: () => void }) {
   const trace = useQuery({
     queryKey: ["trace", authEpoch, traceId],
-    queryFn: () => api.get(`/api/traces/${encodeURIComponent(traceId!)}`, TraceDetailSchema),
+    queryFn: ({ signal }) => api.get(`/api/traces/${encodeURIComponent(traceId!)}`, TraceDetailSchema, { signal }),
     enabled: !!traceId,
   });
   return (

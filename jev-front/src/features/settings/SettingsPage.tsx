@@ -10,7 +10,7 @@ export function SettingsPage({ token, authEpoch, onSave, onLogout }: { token: st
   const [draft, setDraft] = useState("");
   const config = useQuery({
     queryKey: ["config", authEpoch],
-    queryFn: () => api.get("/api/admin/config", AdminConfigSchema),
+    queryFn: ({ signal }) => api.get("/api/admin/config", AdminConfigSchema, { signal }),
     enabled: !!token,
   });
   return (

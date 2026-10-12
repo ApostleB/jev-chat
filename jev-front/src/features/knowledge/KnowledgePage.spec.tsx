@@ -47,3 +47,26 @@ describe("KnowledgePage", () => {
     expect(await screen.findByText("요청이 많습니다. 4초 후 다시 시도하세요.")).toBeTruthy();
   });
 });
+
+describe("KnowledgePage — 인증 세대 [F2]", () => {
+  it("로그아웃(세대 변경) 뒤 늦게 끝난 재로드의 toast는 뜨지 않는다", async () => {
+    const { markAuthChanged } = await import("@/lib/auth-generation");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = new URL(url);
+      if (u.pathname === "/api/admin/knowledge/reload" && init?.method === "POST") {
+        await gate;
+        return new Response(JSON.stringify({ versionId: "v1", changed: true }), { status: 201, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ items: [], nextCursor: null }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fn);
+    renderWithQuery(<><KnowledgePage enabled authEpoch={0} /><Toaster /></>);
+    await userEvent.click(await screen.findByRole("button", { name: "활성 지식 인덱스 다시 로드" }));
+    markAuthChanged();
+    release();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText("새 버전을 적용했습니다.")).toBeNull();
+  });
+});

@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ReviewQueueItemSchema, ReviewSchema, type ReviewQueueItem, type ReviewRequest } from "@jev-chat/protocol";
 import { useState } from "react";
 import { toast } from "sonner";
+import { captureAuthGeneration } from "@/lib/auth-generation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api, errorText } from "@/lib/api";
@@ -14,7 +15,9 @@ export function ReviewPage({ enabled, authEpoch }: { enabled: boolean; authEpoch
   const queue = useCursorList({ key: "reviews", authEpoch, path: "/api/reviews/queue", item: ReviewQueueItemSchema, enabled });
   const save = useMutation({
     mutationFn: (r: ReviewRequest) => api.post(`/api/traces/${encodeURIComponent(selected!.traceId)}/review`, r, ReviewSchema),
-    onSuccess: () => {
+    onMutate: () => ({ isCurrent: captureAuthGeneration() }),
+    onSuccess: (_r, _v, ctx) => {
+      if (!ctx?.isCurrent()) return; // [F2] 인증 세대가 지났으면 toast·재조회 모두 하지 않는다
       toast.success("검수를 저장했습니다.");
       return queryClient.invalidateQueries({ queryKey: ["reviews", authEpoch] });
     },
