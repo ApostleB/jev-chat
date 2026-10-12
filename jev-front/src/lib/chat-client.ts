@@ -206,7 +206,7 @@ export class ChatClient {
     const idParsed = UuidSchema.safeParse(opts.clientMsgId ?? this.newId());
     if (!idParsed.success) throw new Error("clientMsgId 형식 오류");
     const clientMsgId = idParsed.data;
-    this.opts.dispatch({ type: "localSend", sessionId: sid, clientMsgId, text: parsed.data });
+    this.opts.dispatch({ type: "localSend", sessionId: sid, clientMsgId, text: parsed.data, ...(opts.retryOfTurnSeq ? { retryOfTurnSeq: opts.retryOfTurnSeq } : {}) });
     const raw = await s
       .timeout(ACK_TIMEOUT)
       .emitWithAck("chat:send", { sessionId: sid, clientMsgId, text: parsed.data, ...(opts.retryOfTurnSeq ? { retryOfTurnSeq: opts.retryOfTurnSeq } : {}) })

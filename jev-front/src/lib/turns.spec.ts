@@ -147,3 +147,25 @@ describe("syncStart", () => {
     expect(s.byClientId[C]).toMatchObject({ status: "completed", assistantText: "답", userText: "질" });
   });
 });
+
+describe("turnsReducer — 재전송 표시 [S2]", () => {
+  const failed = { turnId: "t1", turnSeq: 1, clientMsgId: cid(1), userText: "q", status: "failed" as const, error: { code: "RESTARTED" as const, retryable: true } };
+  it("localSend의 retryOfTurnSeq를 턴에 남기고 hydrate·done 뒤에도 유지한다", () => {
+    const s = run([
+      { type: "hydrate", sessionId: sid, turns: [failed] },
+      { type: "localSend", sessionId: sid, clientMsgId: cid(2), text: "q", retryOfTurnSeq: 1 },
+      done(2),
+      { type: "hydrate", sessionId: sid, turns: [{ turnId: "t2", turnSeq: 2, clientMsgId: cid(2), userText: "q", status: "completed", assistantText: "a", route: "faq" }] },
+    ]);
+    expect(orderedTurns(s).map((t) => t.retryOfTurnSeq)).toEqual([undefined, 1]);
+  });
+  it("같은 clientMsgId 복구 재전송(retryOfTurnSeq 없음)은 기존 값을 지우지 않는다", () => {
+    const s = run([
+      { type: "hydrate", sessionId: sid, turns: [] },
+      { type: "localSend", sessionId: sid, clientMsgId: cid(2), text: "q", retryOfTurnSeq: 1 },
+      { type: "ackFailed", sessionId: sid, clientMsgId: cid(2), error: uncertain },
+      { type: "localSend", sessionId: sid, clientMsgId: cid(2), text: "q" },
+    ]);
+    expect(orderedTurns(s)[0]?.retryOfTurnSeq).toBe(1);
+  });
+});

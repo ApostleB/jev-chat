@@ -171,6 +171,8 @@ describe("ChatClient — 전송 [U2]", () => {
     const turn = { clientMsgId: cid(1), userText: "q", turnSeq: 3, sendError: { code: "QUEUE_FULL", message: "", retryable: true, uncertain: false } } as UiTurn;
     await c.client.retry(turn);
     expect(c.sock.emitted.at(-1)?.payload).toMatchObject({ clientMsgId: cid(2), retryOfTurnSeq: 3 });
+    // [S2] 로컬 상태에도 재전송 원본 turnSeq를 남긴다
+    expect(c.actions.filter((a) => a.type === "localSend").at(-1)).toMatchObject({ clientMsgId: cid(2), retryOfTurnSeq: 3 });
   });
 
   it("ack timeout(예외) → 미확정, 다시 보내기는 같은 clientMsgId·같은 text, retryOfTurnSeq 없음", async () => {
@@ -187,6 +189,7 @@ describe("ChatClient — 전송 [U2]", () => {
     const payload = c.sock.emitted.at(-1)?.payload as Record<string, unknown>;
     expect(payload).toMatchObject({ clientMsgId: cid(1), text: "q" });
     expect(payload.retryOfTurnSeq).toBeUndefined();
+    expect(c.actions.filter((a) => a.type === "localSend").at(-1)).not.toHaveProperty("retryOfTurnSeq");
   });
 
   it("형식이 틀린 send ack도 미확정으로 처리", async () => {

@@ -38,4 +38,28 @@ describe("ChatThread", () => {
     render(<ChatThread turns={[t({ stage: "judging" })]} onRetry={() => {}} onSelect={() => {}} />);
     expect(screen.getByText(/판단 중/)).toBeTruthy();
   });
+  describe("[S2] 이미 다시 보낸 실패 턴", () => {
+    const failed = t({ status: "failed", error: { code: "RESTARTED", retryable: true } });
+    it("retryOfTurnSeq가 이 턴의 turnSeq인 턴이 있으면 버튼을 숨기고 '다시 보냄'을 표시한다", () => {
+      const retry = t({ clientMsgId: "c2", localId: "l2", turnSeq: 2, retryOfTurnSeq: 1, status: "completed", assistantText: "a", route: "faq", sources: [] });
+      render(<ChatThread turns={[failed, retry]} onRetry={() => {}} onSelect={() => {}} />);
+      expect(screen.queryByRole("button", { name: "다시 보내기" })).toBeNull();
+      expect(screen.getByText("다시 보냄")).toBeTruthy();
+    });
+    it("재전송 턴이 진행 중이어도 숨긴다", () => {
+      const retry = t({ clientMsgId: "c2", localId: "l2", turnSeq: 0, retryOfTurnSeq: 1, status: "processing", stage: "queued" });
+      render(<ChatThread turns={[failed, retry]} onRetry={() => {}} onSelect={() => {}} />);
+      expect(screen.queryByRole("button", { name: "다시 보내기" })).toBeNull();
+    });
+    it("재전송이 확정 거절된 경우(sendError, uncertain=false)에는 원본 버튼을 유지한다", () => {
+      const retry = t({ clientMsgId: "c2", localId: "l2", turnSeq: 0, retryOfTurnSeq: 1, sendError: { code: "QUEUE_FULL", message: "많음", retryable: true, uncertain: false } });
+      render(<ChatThread turns={[failed, retry]} onRetry={() => {}} onSelect={() => {}} />);
+      expect(screen.getAllByRole("button", { name: "다시 보내기" })).toHaveLength(2);
+    });
+    it("미확정 복구 재전송 표시는 다른 턴에 영향이 없다", () => {
+      const other = t({ clientMsgId: "c3", localId: "l3", turnSeq: 5, status: "failed", error: { code: "RESTARTED", retryable: true } });
+      render(<ChatThread turns={[failed, other]} onRetry={() => {}} onSelect={() => {}} />);
+      expect(screen.getAllByRole("button", { name: "다시 보내기" })).toHaveLength(2);
+    });
+  });
 });

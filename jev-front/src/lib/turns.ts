@@ -12,6 +12,8 @@ export type UiTurn = Turn & {
   localId: string;
   stage?: "queued" | "judging" | "answering";
   sendError?: SendError;
+  /** [S2] 이 턴이 다시 보내기로 만들어졌다면 원본 turnSeq. protocol Turn에는 없어 프론트 로컬로만 유지(이력 새로고침 후에는 알 수 없음) */
+  retryOfTurnSeq?: number;
 };
 
 export interface TurnsState {
@@ -23,7 +25,7 @@ export interface TurnsState {
 export type TurnsAction =
   | { type: "syncStart"; sessionId: string }
   | { type: "hydrate"; sessionId: string; turns: Turn[] }
-  | { type: "localSend"; sessionId: string; clientMsgId: string; text: string }
+  | { type: "localSend"; sessionId: string; clientMsgId: string; text: string; retryOfTurnSeq?: number }
   | { type: "ack"; sessionId: string; clientMsgId: string; turnId: string; turnSeq: number }
   | { type: "ackFailed"; sessionId: string; clientMsgId: string; error: SendError }
   | { type: "status"; e: ChatStatusEvent }
@@ -78,7 +80,7 @@ export function turnsReducer(state: TurnsState, a: TurnsAction): TurnsState {
     case "localSend":
       if (a.sessionId !== state.sessionId) return state; // [U3]
       return put(state, a.clientMsgId, (prev) =>
-        isTerminal(prev) ? prev : { ...stripLocal(prev), userText: a.text, status: "processing", stage: "queued" },
+        isTerminal(prev) ? prev : { ...stripLocal(prev), userText: a.text, status: "processing", stage: "queued", ...(a.retryOfTurnSeq ? { retryOfTurnSeq: a.retryOfTurnSeq } : {}) },
       );
     case "ack":
       if (a.sessionId !== state.sessionId) return state;
