@@ -10,6 +10,9 @@ const MIN_TYPES: Record<string, number> = {
   normal: 20, negation: 6, confusable: 12, out_of_scope: 8, smalltalk: 4, followup: 10, ambiguous: 6, injection: 6, number_date: 5, option_order: 4,
 };
 
+const norm = (t: string) => t.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
+const userTexts = (i: { message: string; turns: { role: string; text: string }[] }) => [i.message, ...i.turns.filter((t) => t.role === "user").map((t) => t.text)];
+
 describe("HB-ERP domain-pack 계약", () => {
   it("팩이 검증을 통과하고 분량·분포를 지킨다", async () => {
     const pack = await loadDomainPack(PACK);
@@ -47,6 +50,14 @@ describe("HB-ERP domain-pack 계약", () => {
     for (const i of items.filter((x) => x.type === "followup")) expect(i.turns.length, i.id).toBeGreaterThanOrEqual(2);
   });
 
+  it("tune의 사용자 문장이 FAQ variants·summary와 정규화 후 일치하지 않는다(BM25 문자열 일치 방지)", async () => {
+    const pack = await loadDomainPack(PACK);
+    const faqTexts = new Set(pack.faqs.flatMap((f) => [...f.variants, f.summary]).map(norm));
+    const items = await loadEvalSet(resolve(PACK, "eval/tune.jsonl"), pack);
+    const bad = items.filter((i) => userTexts(i).some((t) => faqTexts.has(norm(t)))).map((i) => i.id);
+    expect(bad).toEqual([]);
+  });
+
   it("holdout 파일이 있다면 tune과 ID·메시지가 겹치지 않는다(구현자는 holdout을 열지 않음 — 이 테스트는 하네스가 확인)", async () => {
     const holdout = resolve(PACK, "eval/holdout.jsonl");
     if (!existsSync(holdout)) return;
@@ -56,5 +67,8 @@ describe("HB-ERP domain-pack 계약", () => {
     const tuneMsgs = new Set(tune.map((i) => i.message.trim()));
     // [E9] 실패해도 항목 내용·ID를 출력하지 않고 개수만 비교한다
     expect(hold.filter((i) => tuneIds.has(i.id) || tuneMsgs.has(i.message.trim())).length).toBe(0);
+    // 같은 이유로 FAQ 문구와의 정규화 일치도 개수만 비교한다
+    const faqTexts = new Set(pack.faqs.flatMap((f) => [...f.variants, f.summary]).map(norm));
+    expect(hold.filter((i) => userTexts(i).some((t) => faqTexts.has(norm(t)))).length).toBe(0);
   });
 });
