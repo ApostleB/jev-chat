@@ -1,7 +1,7 @@
 import { ChatDoneEventSchema, ChatErrorEventSchema, TurnSchema } from "@jev-chat/protocol";
 import { describe, expect, it } from "vitest";
 import type { TurnRow } from "../../adapters/persistence/turn.repository";
-import { toDoneEvent, toErrorEvent, toProtocolTurn } from "./turn-mapper";
+import { CorruptRouteError, parseRoute, toDoneEvent, toErrorEvent, toProtocolTurn } from "./turn-mapper";
 
 const sid = "00000000-0000-4000-8000-000000000001";
 const base: TurnRow = {
@@ -34,5 +34,19 @@ describe("turn-mapper (프로토콜 스키마를 실제로 통과해야 한다)"
   it("알 수 없는 errorCode는 INTERNAL로 정규화", () => {
     const row: TurnRow = { ...base, status: "failed", errorCode: "WEIRD", errorRetryable: false };
     expect(toProtocolTurn(row).error).toEqual({ code: "INTERNAL", retryable: false });
+  });
+  it("[M-9] 저장된 route가 알려진 값이 아니면(DB 드리프트) 캐스트하지 않고 CorruptRouteError로 던진다", () => {
+    const bad: TurnRow = { ...base, status: "completed", assistantText: "답", route: "weird", sources: src, traceId: "tr1" };
+    expect(() => toProtocolTurn(bad)).toThrow(CorruptRouteError);
+    expect(() => toDoneEvent(bad, sid)).toThrow(CorruptRouteError);
+    const nul: TurnRow = { ...bad, route: null };
+    expect(() => toProtocolTurn(nul)).toThrow(CorruptRouteError);
+    expect(() => parseRoute("faq")).not.toThrow();
+    try {
+      parseRoute("weird");
+    } catch (e) {
+      expect((e as Error).name).toBe("CorruptRouteError"); // 로그에는 이름만 남는다(값 미포함)
+      expect((e as Error).message).not.toContain("weird");
+    }
   });
 });

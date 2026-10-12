@@ -1,4 +1,4 @@
-import { ErrorCodeSchema, type ChatDoneEvent, type ChatErrorEvent, type ErrorCode, type Route, type Turn } from "@jev-chat/protocol";
+import { ErrorCodeSchema, RouteSchema, type ChatDoneEvent, type ChatErrorEvent, type ErrorCode, type Route, type Turn } from "@jev-chat/protocol";
 import type { TurnRow } from "../../adapters/persistence/turn.repository";
 
 export const ERROR_MESSAGES: Record<ErrorCode, string> = {
@@ -14,6 +14,20 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: "대상을 찾을 수 없습니다.",
   INTERNAL: "처리 중 오류가 발생했습니다. 다시 시도해주세요.",
 };
+
+/** 저장된 route가 프로토콜의 Route가 아님(데이터 손상). 호출자는 로그(이름만) 후 INTERNAL로 처리한다. */
+export class CorruptRouteError extends Error {
+  override name = "CorruptRouteError";
+  constructor() {
+    super("저장된 route 값이 올바르지 않습니다.");
+  }
+}
+
+export function parseRoute(route: string | null): Route {
+  const parsed = RouteSchema.safeParse(route);
+  if (!parsed.success) throw new CorruptRouteError();
+  return parsed.data;
+}
 
 function normalizeCode(code: string | null): ErrorCode {
   const parsed = ErrorCodeSchema.safeParse(code);
@@ -31,7 +45,7 @@ export function toProtocolTurn(row: TurnRow): Turn {
   return {
     ...base,
     assistantText: row.assistantText ?? "",
-    route: row.route as Route,
+    route: parseRoute(row.route),
     sources: row.sources ?? [],
     ...(row.traceId ? { traceId: row.traceId } : {}),
     ...(row.route === "error" ? { error: errorOf(row) } : {}),
@@ -45,7 +59,7 @@ export function toDoneEvent(row: TurnRow, sessionId: string): ChatDoneEvent {
     turnSeq: row.turnSeq,
     turnId: row.id,
     text: row.assistantText ?? "",
-    route: row.route as Route,
+    route: parseRoute(row.route),
     sources: row.sources ?? [],
     traceId: row.traceId ?? "",
     ...(row.route === "error" ? { error: errorOf(row) } : {}),

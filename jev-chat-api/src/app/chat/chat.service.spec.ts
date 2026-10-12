@@ -95,6 +95,22 @@ describe("ChatService", () => {
     expect(await send(svc, admin, own, "q")).toMatchObject({ ok: true });
   });
 
+  it("[M-9] 저장된 route가 손상됐으면 session:start는 INTERNAL ack + 원인(이름) 로그", async () => {
+    const logs: Array<[string, unknown]> = [];
+    const store = new InMemoryTurnStore();
+    const snap = makeSnapshot({ chunks, faqs });
+    const svc = new ChatService({
+      store, snapshots: { current: () => snap }, judge: faqJudge(), queue: new SessionQueue({ capacity: 5 }),
+      sendLimiter: new SlidingWindowRateLimiter(10, 60_000), sessionLimiter: new SlidingWindowRateLimiter(20, 60_000), replayLimiter: new SlidingWindowRateLimiter(30, 60_000),
+      log: (where, err) => logs.push([where, err]),
+    });
+    const sid = await session(svc);
+    await store.reserveTurn({ sessionId: sid, clientMsgId: randomUUID(), userText: "q" });
+    Object.assign(store.turns[0]!, { status: "completed", assistantText: "답", route: "weird", sources: [], traceId: "tr" });
+    expect(await svc.startSession(alice, { sessionId: sid }, "front-test", noJoin)).toMatchObject({ ok: false, error: { code: "INTERNAL" } });
+    expect(logs.some(([where, err]) => where === "startSession" && (err as Error).name === "CorruptRouteError")).toBe(true);
+  });
+
   it("[B1] 저장소 조회 예외 → INTERNAL ack(예외를 던지지 않음), 슬롯 누수 없음", async () => {
     const { store, svc } = setup();
     const sid = await session(svc);

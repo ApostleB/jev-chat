@@ -1,12 +1,13 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { z } from "zod";
-import { ReviewRequestSchema, type Page, type Review, type ReviewQueueItem, type Route, type TraceDetail } from "@jev-chat/protocol";
+import { ReviewRequestSchema, type Page, type Review, type ReviewQueueItem, type TraceDetail } from "@jev-chat/protocol";
 import { ReviewRepository } from "../../adapters/persistence/review.repository";
 import { TurnRepository } from "../../adapters/persistence/turn.repository";
 import { canReadSession } from "../auth/access";
 import type { AuthedPrincipal } from "../auth/auth.types";
 import { CurrentPrincipal, HttpAuthGuard, Roles } from "../auth/http-auth.guard";
 import { SlidingWindowRateLimiter } from "../chat/rate-limiter";
+import { parseRoute } from "../chat/turn-mapper";
 import { ApiException } from "./api-error";
 import { ADMIN_LIMITER, TimeIdCursor } from "./cursor";
 
@@ -27,7 +28,7 @@ export class TracesController {
     const t = z.uuid().safeParse(id).success ? await this.turns.findTrace(id) : null;
     if (!t) throw new ApiException("NOT_FOUND");
     if (!canReadSession(p, t.sessionUserId)) throw new ApiException("FORBIDDEN");
-    return { id: t.id, turnId: t.turnId, sessionId: t.sessionId, route: t.route as Route, createdAt: t.createdAt.toISOString(), data: t.data, reviews: await this.reviews.listByTrace(t.id) };
+    return { id: t.id, turnId: t.turnId, sessionId: t.sessionId, route: parseRoute(t.route), createdAt: t.createdAt.toISOString(), data: t.data, reviews: await this.reviews.listByTrace(t.id) };
   }
 
   @Get("reviews/queue")

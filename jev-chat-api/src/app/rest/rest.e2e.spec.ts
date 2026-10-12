@@ -89,6 +89,19 @@ describe.runIf(enabled)("REST E2E (통합)", () => {
     }
   });
 
+  it("[M-9] DB의 route가 손상됐으면 캐스트하지 않고 500 INTERNAL ApiError", async () => {
+    const prisma = createPrismaClient(dbConfigFromUrl(process.env.TEST_DATABASE_URL!));
+    try {
+      await prisma.messageTrace.update({ where: { id: traceId }, data: { route: "weird" } });
+      const r = await get(`/api/traces/${traceId}`, "admin");
+      expect(r.status).toBe(500);
+      expect(ApiErrorSchema.parse(await r.json()).error.code).toBe("INTERNAL");
+    } finally {
+      await prisma.messageTrace.update({ where: { id: traceId }, data: { route: "reference" } });
+      await prisma.$disconnect();
+    }
+  });
+
   it("trace: debug + 세션 접근 권한 둘 다 필요", async () => {
     expect((await get(`/api/traces/${traceId}`, "alice")).status).toBe(403); // debug 아님
     expect((await get(`/api/traces/${traceId}`, "bob")).status).toBe(403); // debug지만 남의 세션
