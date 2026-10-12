@@ -299,7 +299,7 @@ type ErrorCode = "UNAUTHORIZED" | "FORBIDDEN" | "PROTOCOL_UNSUPPORTED" | "INVALI
 - `sources[]`: `{ chunkId, versionId, contentHash, title, section }` — **실제로 보여준 근거만** [R16].
 - 멱등 [R8][F2]: 같은 `(sessionId, clientMsgId)` + 같은 text → `duplicate`. completed면 `chat:done`, failed면 저장된 `chat:error`를 **요청한 소켓에만** 재발송(재발송 제한 분당 30), processing이면 완료 시 room으로 발송(stale이면 failed 전환이 성공했을 때만 RESTARTED, 아니면 최신 결과). text가 다르면 `INVALID_INPUT`.
 - 처리 결과 이벤트는 ack보다 먼저 도착할 수 있다 — 클라이언트는 `clientMsgId`/`turnSeq` 기준 upsert.
-- 검증 [R17][F9]: `text`는 trim 후 1~1000자(유니코드 코드포인트 기준), `clientMsgId`는 uuid, `sessionId`는 uuid, 페이로드 전체 8KB 이하.
+- 검증 [R17][F9]: `text`는 trim 후 1~1000자(유니코드 코드포인트 기준), `clientMsgId`는 uuid, `sessionId`는 uuid, 페이로드 전체 8KB 이하. **모든 입력 UUID는 경계(protocol 스키마·REST 경로)에서 소문자로 정규화**하고, 서버는 권한 조회에서 얻은 canonical sessionId를 잠금·큐·슬롯·room·이벤트·저장에 일관되게 쓴다(DB collation이 대소문자를 무시하므로 표기 차이로 세션 순차 처리를 우회하지 못하게, 2026-10-12).
 - 제한 [R17]: 사용자당(userId 기준, 재연결 무관) 메시지 분당 10건, 세션 생성 분당 20건, 세션 대기+처리 5건 초과 시 `QUEUE_FULL(retryAfterMs)`.
 - 예약(MVP 미구현): `chat:delta { sessionId, clientMsgId, turnSeq, index, text }` — 외부 LLM 도입 시 추가 [F10].
 
