@@ -127,3 +127,23 @@ describe("turnsReducer", () => {
     expect(s.traces.tr1).toEqual({ route: "faq" });
   });
 });
+
+describe("syncStart", () => {
+  const S = "00000000-0000-4000-8000-000000000001";
+  it("sessionId가 같으면 state 그대로", () => {
+    const s = turnsReducer(initialTurns, { type: "syncStart", sessionId: S });
+    expect(s.sessionId).toBe(S);
+    expect(turnsReducer(s, { type: "syncStart", sessionId: S })).toBe(s);
+  });
+  it("다르면 비우고 새 sessionId", () => {
+    const s = { sessionId: "other", byClientId: { x: {} as never }, traces: { t: {} } };
+    expect(turnsReducer(s, { type: "syncStart", sessionId: S })).toEqual({ sessionId: S, byClientId: {}, traces: {} });
+  });
+  it("먼저 반영된 done이 processing hydrate에 덮이지 않는다 [U8]", () => {
+    const C = "00000000-0000-4000-8000-00000000aaaa";
+    let s = turnsReducer(initialTurns, { type: "syncStart", sessionId: S });
+    s = turnsReducer(s, { type: "done", e: { sessionId: S, clientMsgId: C, turnSeq: 1, turnId: "t1", text: "답", route: "faq", sources: [], traceId: "tr" } as never });
+    s = turnsReducer(s, { type: "hydrate", sessionId: S, turns: [{ turnId: "t1", turnSeq: 1, clientMsgId: C, userText: "질", status: "processing" }] as never });
+    expect(s.byClientId[C]).toMatchObject({ status: "completed", assistantText: "답", userText: "질" });
+  });
+});

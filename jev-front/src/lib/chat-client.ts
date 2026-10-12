@@ -143,6 +143,8 @@ export class ChatClient {
     if (mode === "sync") {
       this.ready = false;
       this.opts.onSession({ kind: "syncing" });
+      // resume(재연결 포함): ack 전에 도착하는 같은 세션 이벤트를 받도록 리듀서에 대상 세션을 먼저 알린다
+      if (sessionId) this.opts.dispatch({ type: "syncStart", sessionId });
     }
     const payload = { ...(sessionId ? { sessionId } : {}), ...(beforeTurnSeq ? { beforeTurnSeq } : {}) };
     const raw = await s

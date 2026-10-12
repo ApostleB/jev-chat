@@ -21,6 +21,7 @@ export interface TurnsState {
 }
 
 export type TurnsAction =
+  | { type: "syncStart"; sessionId: string }
   | { type: "hydrate"; sessionId: string; turns: Turn[] }
   | { type: "localSend"; sessionId: string; clientMsgId: string; text: string }
   | { type: "ack"; sessionId: string; clientMsgId: string; turnId: string; turnSeq: number }
@@ -60,6 +61,9 @@ export function turnsReducer(state: TurnsState, a: TurnsAction): TurnsState {
   switch (a.type) {
     case "reset":
       return initialTurns;
+    case "syncStart":
+      // resume session:start 전에 대상 세션을 먼저 알려, ack 전에 온 같은 세션의 done/error/trace를 받는다
+      return state.sessionId === a.sessionId ? state : { ...initialTurns, sessionId: a.sessionId };
     case "hydrate": {
       let s: TurnsState = state.sessionId === a.sessionId ? state : { ...initialTurns, sessionId: a.sessionId };
       for (const t of a.turns) {
