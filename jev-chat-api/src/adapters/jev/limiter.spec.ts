@@ -92,4 +92,26 @@ describe("JevLimiter", () => {
     r();
     expect(limiter.stats().active).toBe(0);
   });
+
+  it("대기자가 있는 동안 폴링 타이머는 이벤트 루프를 유지한다(hasRef)", async () => {
+    const limiter = new JevLimiter({ ...cfg, maxConcurrent: 1 });
+    const r1 = await limiter.acquire(10, live());
+    const timers: NodeJS.Timeout[] = [];
+    const orig = globalThis.setTimeout;
+    globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+      const t = orig(...args);
+      timers.push(t);
+      return t;
+    }) as typeof setTimeout;
+    let p3: Promise<() => void>;
+    try {
+      p3 = limiter.acquire(10, live());
+    } finally {
+      globalThis.setTimeout = orig;
+    }
+    expect(timers.length).toBeGreaterThan(0);
+    expect(timers.every((t) => t.hasRef())).toBe(true);
+    r1();
+    (await p3)();
+  });
 });

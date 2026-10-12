@@ -115,10 +115,10 @@ export class JevLimiter {
       return;
     }
     if (this.timer) return;
+    // 대기자는 maxWaitMs 기한으로 반드시 끝나므로 ref 유지 (unref하면 평가 CLI가 pending Promise를 둔 채 종료됨)
     this.timer = setTimeout(() => {
       this.timer = null;
       this.pump();
     }, POLL_MS);
-    this.timer.unref?.();
   }
 }

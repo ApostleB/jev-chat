@@ -1,11 +1,5 @@
 import "dotenv/config";
 import { main } from "./run-eval";
+import { runCli } from "./run-cli";
 
-main()
-  .then((code) => {
-    process.exitCode = code;
-  })
-  .catch((e: unknown) => {
-    console.error(String((e as Error)?.message ?? e));
-    process.exitCode = 1;
-  });
+void runCli(main, process);
