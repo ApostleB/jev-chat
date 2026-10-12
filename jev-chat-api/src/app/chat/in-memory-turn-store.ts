@@ -13,6 +13,8 @@ export class InMemoryTurnStore implements TurnStore {
   throwOn = new Set<string>();
   /** [B2] failTurn 직전에 실행(경합 재현용) */
   beforeFail: (() => void) | null = null;
+  /** failTurn이 상태와 무관하게 false를 반환(다른 경로가 종료했으나 아직 processing으로 보이는 경합 재현) */
+  failReturnsFalse = false;
   readonly calls: string[] = [];
 
   async createSession(userId: string, _channel: string) {
@@ -53,6 +55,7 @@ export class InMemoryTurnStore implements TurnStore {
   }
   async failTurn(turnId: string, code: string, retryable: boolean) {
     this.beforeFail?.();
+    if (this.failReturnsFalse) return false;
     const t = this.turns.find((x) => x.id === turnId);
     if (!t || t.status !== "processing") return false;
     Object.assign(t, { status: "failed", errorCode: code, errorRetryable: retryable });

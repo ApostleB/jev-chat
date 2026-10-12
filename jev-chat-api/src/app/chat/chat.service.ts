@@ -181,10 +181,22 @@ export class ChatService {
     try {
       const changed = await this.deps.store.failTurn(turn.id, "QUEUE_TIMEOUT", true);
       if (changed) events.error(toErrorEvent({ ...turn, status: "failed", errorCode: "QUEUE_TIMEOUT", errorRetryable: true }, turn.sessionId));
+      else await this.notifyStored(turn, events);
     } catch (e) {
       this.log("expire", e);
     } finally {
       this.finish(turn, state);
+    }
+  }
+
+  /** [M-1] failTurn이 false면 다른 경로가 이미 종료시킨 것이다. 저장된 최신 상태대로 room에 알린다(processing이면 알리지 않는다). */
+  private async notifyStored(turn: TurnRow, events: ChatEvents): Promise<void> {
+    try {
+      const latest = await this.deps.store.findTurnByClientMsgId(turn.sessionId, turn.clientMsgId);
+      if (latest?.status === "completed") events.done(toDoneEvent(latest, latest.sessionId));
+      else if (latest?.status === "failed") events.error(toErrorEvent(latest, latest.sessionId));
+    } catch (e) {
+      this.log("notifyStored", e);
     }
   }
 
@@ -211,6 +223,7 @@ export class ChatService {
     const failWith = async (code: ErrorCode, retryable: boolean) => {
       const changed = await this.deps.store.failTurn(turn.id, code, retryable).catch((e) => (this.log("failTurn", e), false));
       if (changed) events.error(toErrorEvent({ ...turn, status: "failed", errorCode: code, errorRetryable: retryable }, turn.sessionId));
+      else await this.notifyStored(turn, events);
     };
     try {
       let snapshot: ExecutionSnapshot;

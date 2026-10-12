@@ -219,6 +219,41 @@ describe("ChatService", () => {
     expect(svc.inflightCount()).toBe(0);
   });
 
+  it("[M-1] failTurn이 false(다른 경로가 이미 종료)면 저장된 최신 상태대로 통지한다: completed→done, failed→error, processing→무통지", async () => {
+    const judge = new FakeJudge(async () => { throw new Error("bug"); }, async () => { throw new Error("bug"); });
+    for (const [finalState, expected] of [["completed", "done"], ["failed", "error:RESTARTED"], ["processing", null]] as const) {
+      const { store, svc } = setup({ judge });
+      const sid = await session(svc);
+      store.beforeFail = () => {
+        const t = store.turns[0]!;
+        if (finalState === "completed") Object.assign(t, { status: "completed", assistantText: "다른 경로 완료", route: "faq", sources: [], traceId: "tr-1" });
+        if (finalState === "failed") Object.assign(t, { status: "failed", errorCode: "RESTARTED", errorRetryable: true });
+      };
+      if (finalState === "processing") store.failReturnsFalse = true;
+      const ev = new Recorder();
+      await send(svc, alice, sid, "법인카드", ev);
+      await settle();
+      expect(ev.log.filter((l) => l === "done" || l.startsWith("error:")), finalState).toEqual(expected ? [expected] : []);
+    }
+  });
+
+  it("[M-1] 대기 만료(expire)에서 failTurn이 false여도 같은 규칙으로 통지한다", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const judge = new FakeJudge(async () => { await gate; return okTurn({ regulation: 1 }); }, async (req) => okRelevance(req.chunk.id, 0.9));
+    const policy: Policy = { ...DEFAULT_POLICY, deadlines: { ...DEFAULT_POLICY.deadlines, queueMs: 50 } };
+    const { store, svc } = setup({ judge, policy, capacity: 2 });
+    const sid = await session(svc);
+    await send(svc, alice, sid, "법인카드 첫째");
+    store.beforeFail = () => Object.assign(store.turns[1]!, { status: "failed", errorCode: "RESTARTED", errorRetryable: true });
+    const ev = new Recorder();
+    await send(svc, alice, sid, "법인카드 둘째", ev);
+    await settle(120);
+    expect(ev.errors[0]).toMatchObject({ code: "RESTARTED" });
+    release();
+    await settle(80);
+  });
+
   it("[M-4] 판단이 abort를 무시하고 pending이어도 엔진 기한 후 오류 응답(completed, route=error)으로 확정하고 슬롯·세션 체인을 놓는다. 늦은 결과는 저장·발송하지 않는다", async () => {
     let lateResolve!: () => void;
     const hang = new Promise<void>((r) => (lateResolve = r));
