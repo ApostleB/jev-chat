@@ -1,3 +1,4 @@
+import type { KnowledgeChunkItem, KnowledgeFaqItem, Page } from "@jev-chat/protocol";
 import type { Chunk, Faq, IntentId } from "../../core";
 import type { PrismaClient } from "../../generated/prisma/client";
 import { compareById, type DomainPack } from "../knowledge/pack-loader";
@@ -109,5 +110,36 @@ export class KnowledgeRepository {
         variants: f.variants.map((v) => v.text),
       })),
     };
+  }
+
+  async listChunks(versionId: string, page: { cursor?: string; limit: number }): Promise<Page<KnowledgeChunkItem>> {
+    const rows = await this.prisma.knowledgeChunk.findMany({
+      where: { versionId, ...(page.cursor ? { id: { gt: page.cursor } } : {}) },
+      orderBy: { id: "asc" },
+      take: page.limit + 1,
+    });
+    const items = rows.slice(0, page.limit);
+    return {
+      items: items.map((c) => ({ id: c.id, module: c.module, kind: c.kind, title: c.title, section: c.section, text: c.text })),
+      nextCursor: rows.length > page.limit ? items.at(-1)!.id : null,
+    };
+  }
+
+  async listFaqs(versionId: string, page: { cursor?: string; limit: number }): Promise<Page<KnowledgeFaqItem>> {
+    const rows = await this.prisma.faq.findMany({
+      where: { versionId, ...(page.cursor ? { id: { gt: page.cursor } } : {}) },
+      orderBy: { id: "asc" },
+      take: page.limit + 1,
+      include: { variants: { orderBy: { id: "asc" } } },
+    });
+    const items = rows.slice(0, page.limit);
+    return {
+      items: items.map((f) => ({ id: f.id, intent: f.intent, summary: f.summary, answer: f.answer, sourceChunkId: f.sourceChunkId, variants: f.variants.map((v) => v.text) })),
+      nextCursor: rows.length > page.limit ? items.at(-1)!.id : null,
+    };
+  }
+
+  async findVersion(versionId: string): Promise<{ packName: string; packVersion: string } | null> {
+    return this.prisma.knowledgeVersion.findUnique({ where: { id: versionId }, select: { packName: true, packVersion: true } });
   }
 }

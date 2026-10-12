@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Page, ReviewQueueItem, SessionSummary } from "@jev-chat/protocol";
 import type { CompletedTurn, ContextReader, EngineResult, SourceRef, TraceRecord } from "../../core";
 import type { PrismaClient } from "../../generated/prisma/client";
 
@@ -200,5 +201,59 @@ export class TurnRepository implements ContextReader {
     });
     const hasMore = rows.length > opts.limit;
     return { turns: rows.slice(0, opts.limit).reverse().map(toRow), hasMore };
+  }
+
+  async listSessions(filter: { userId?: string; route?: string; intent?: string }, page: { cursor?: string; limit: number }): Promise<Page<SessionSummary>> {
+    const [cursorAt, cursorId] = page.cursor ? page.cursor.split("|") : [undefined, undefined];
+    const rows = await this.prisma.chatSession.findMany({
+      where: {
+        ...(filter.userId ? { userId: filter.userId } : {}),
+        ...(filter.route || filter.intent
+          ? { turns: { some: { ...(filter.route ? { route: filter.route } : {}), ...(filter.intent ? { trace: { intent: filter.intent } } : {}) } } }
+          : {}),
+        ...(cursorAt && cursorId
+          ? { OR: [{ lastActiveAt: { lt: new Date(cursorAt) } }, { lastActiveAt: new Date(cursorAt), id: { lt: cursorId } }] }
+          : {}),
+      },
+      orderBy: [{ lastActiveAt: "desc" }, { id: "desc" }],
+      take: page.limit + 1,
+      include: { _count: { select: { turns: true } } },
+    });
+    const items = rows.slice(0, page.limit);
+    const last = items.at(-1);
+    return {
+      items: items.map((s) => ({
+        id: s.id, userId: s.userId, channel: s.channel, createdAt: s.createdAt.toISOString(), lastActiveAt: s.lastActiveAt.toISOString(), turnCount: s._count.turns,
+      })),
+      nextCursor: rows.length > page.limit && last ? `${last.lastActiveAt.toISOString()}|${last.id}` : null,
+    };
+  }
+
+  async findTrace(traceId: string) {
+    const t = await this.prisma.messageTrace.findUnique({ where: { id: traceId }, include: { turn: { select: { sessionId: true, session: { select: { userId: true } } } } } });
+    if (!t) return null;
+    return { id: t.id, turnId: t.turnId, sessionId: t.turn.sessionId, sessionUserId: t.turn.session.userId, route: t.route, createdAt: t.createdAt, data: t.data as Record<string, unknown> };
+  }
+
+  async reviewQueue(page: { cursor?: string; limit: number }): Promise<Page<ReviewQueueItem>> {
+    const [cursorAt, cursorId] = page.cursor ? page.cursor.split("|") : [undefined, undefined];
+    const rows = await this.prisma.messageTrace.findMany({
+      where: {
+        OR: [{ route: { in: ["reference", "clarify", "fallback", "error"] } }, { faqProb: { lt: 0.9 } }],
+        ...(cursorAt && cursorId ? { AND: [{ OR: [{ createdAt: { lt: new Date(cursorAt) } }, { createdAt: new Date(cursorAt), id: { lt: cursorId } }] }] } : {}),
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: page.limit + 1,
+      include: { turn: { select: { sessionId: true, userText: true, assistantText: true } }, _count: { select: { reviews: true } } },
+    });
+    const items = rows.slice(0, page.limit);
+    const last = items.at(-1);
+    return {
+      items: items.map((t) => ({
+        traceId: t.id, turnId: t.turnId, sessionId: t.turn.sessionId, userText: t.turn.userText, assistantText: t.turn.assistantText,
+        route: t.route as ReviewQueueItem["route"], intent: t.intent, faqProb: t.faqProb, reviewed: t._count.reviews > 0, createdAt: t.createdAt.toISOString(),
+      })),
+      nextCursor: rows.length > page.limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,
+    };
   }
 }

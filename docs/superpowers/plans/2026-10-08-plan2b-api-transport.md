@@ -1854,7 +1854,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `KnowledgeRepository.listChunks(versionId, page)`, `listFaqs(versionId, page)`
   - 엔드포인트(설계 4장): `GET /api/sessions`, `GET /api/sessions/:id/turns`, `GET /api/traces/:id`, `GET /api/reviews/queue`, `POST /api/traces/:id/review`, `POST /api/admin/knowledge/reload`, `GET /api/admin/config`, `GET /api/knowledge/chunks`, `GET /api/knowledge/faqs`
 
-- [ ] **Step 1: 실패 E2E 테스트 작성**
+- [x] **Step 1: 실패 E2E 테스트 작성**
 
 `jev-chat-api/src/app/rest/rest.e2e.spec.ts`:
 ```ts
@@ -1977,12 +1977,12 @@ describe.runIf(enabled)("REST E2E (통합)", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test -- rest.e2e`
 Expected: FAIL — 엔드포인트 없음(404)
 
-- [ ] **Step 3: 오류 매핑과 HTTP 가드 구현**
+- [x] **Step 3: 오류 매핑과 HTTP 가드 구현**
 
 `jev-chat-api/src/app/rest/api-error.ts`:
 ```ts
@@ -2110,7 +2110,7 @@ export const IdCursor = z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/, "잘못된
 export const ADMIN_LIMITER = Symbol("ADMIN_LIMITER");
 ```
 
-- [ ] **Step 4: 저장소 조회 메서드 추가**
+- [x] **Step 4: 저장소 조회 메서드 추가**
 
 `turn.repository.ts`에 추가:
 ```ts
@@ -2242,7 +2242,7 @@ import type { KnowledgeChunkItem, KnowledgeFaqItem, Page } from "@jev-chat/proto
   }
 ```
 
-- [ ] **Step 5: 컨트롤러와 모듈 구현**
+- [x] **Step 5: 컨트롤러와 모듈 구현**
 
 공통 쿼리 파싱(각 컨트롤러 파일 상단):
 ```ts
@@ -2473,12 +2473,12 @@ export class RestModule {}
 ```
 `app.module.ts`의 `imports`에 `RestModule` 추가.
 
-- [ ] **Step 6: 실행 → 통과 확인**
+- [x] **Step 6: 실행 → 통과 확인**
 
 Run: `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test && pnpm typecheck`
 Expected: REST E2E 9건 포함 전부 PASS (레이트 리밋 테스트는 재로드 제한 창을 소진하므로 파일의 **마지막** 테스트로 둔다)
 
-- [ ] **Step 7: 커밋**
+- [x] **Step 7: 커밋**
 
 ```bash
 git add jev-chat-api

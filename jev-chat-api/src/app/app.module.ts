@@ -8,6 +8,7 @@ import { HealthController } from "./health.controller";
 import { JevModule } from "./jev.module";
 import { SnapshotService } from "./knowledge/snapshot.service";
 import { PersistenceModule } from "./persistence.module";
+import { RestModule } from "./rest.module";
 
 @Module({})
 export class AppModule implements OnApplicationBootstrap {
@@ -20,7 +21,7 @@ export class AppModule implements OnApplicationBootstrap {
     return {
       module: AppModule,
       global: true,
-      imports: [PersistenceModule, JevModule, AuthModule, ChatModule],
+      imports: [PersistenceModule, JevModule, AuthModule, ChatModule, RestModule],
       controllers: [HealthController],
       providers: [
         { provide: ENV, useValue: env },
