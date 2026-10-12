@@ -78,7 +78,7 @@ jev-chat/
   - `class SlidingWindowRateLimiter` — `constructor(limit: number, windowMs: number, now?: () => number)`, `take(key: string): { ok: true } | { ok: false; retryAfterMs: number }`
   - `class SessionQueue` — `constructor(opts: { capacity: number })`, `withLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T>`, `tryReserve(sessionId: string): boolean`, `release(sessionId: string): void`, `run(sessionId: string, task: () => Promise<void>): void`(세션별 순차 실행), `size(sessionId: string): number`
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/app/auth/auth.spec.ts`:
 ```ts
@@ -233,12 +233,12 @@ describe("SessionQueue", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- auth rate-limiter session-queue`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 `jev-chat-api/src/app/auth/auth.types.ts`:
 ```ts
@@ -379,12 +379,12 @@ export class SessionQueue {
 }
 ```
 
-- [ ] **Step 4: 실행 → 통과 확인**
+- [x] **Step 4: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test -- auth rate-limiter session-queue && pnpm --filter jev-chat-api typecheck`
 Expected: PASS
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add jev-chat-api/src/app/auth jev-chat-api/src/app/chat
