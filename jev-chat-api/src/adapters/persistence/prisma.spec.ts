@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { dbConfigFromUrl, resetTestDb, testPrisma } from "./prisma";
+import { createPrismaClient, dbConfigFromUrl, resetTestDb, testPrisma } from "./prisma";
 
 describe("dbConfigFromUrl", () => {
   it("URL을 어댑터 옵션으로 바꾼다(인코딩된 비밀번호 포함)", () => {
@@ -23,13 +23,30 @@ describe.runIf(prisma)("Prisma 스키마 (통합)", () => {
     await expect(prisma!.chatTurn.create({ data: { ...base, turnSeq: 2, clientMsgId: "00000000-0000-4000-8000-0000000000a1" } })).rejects.toThrow();
   });
 
-  it("[저장 기한] 모든 연결의 행 잠금 대기 제한이 2초다", async () => {
-    // 풀의 여러 연결이 모두 initSql을 적용받는지 보도록 동시에 여러 번 조회한다
-    const rows = await Promise.all(
-      [1, 2, 3, 4, 5].map(() => prisma!.$queryRaw<{ t: number | bigint }[]>`SELECT @@SESSION.innodb_lock_wait_timeout AS t`),
-    );
-    for (const r of rows) expect(Number(r[0]?.t)).toBe(2);
-  });
+  it("[저장 기한·D2] 풀의 서로 다른 연결 N개를 동시에 점유해도 모두 행 잠금 대기 제한이 2초다", async () => {
+    // 대화형 트랜잭션 N개가 각자 연결을 쥔 채 barrier에서 기다리게 해, 서로 다른 물리 연결 N개에 initSql이 적용됐는지 본다
+    const N = 4;
+    const client = createPrismaClient({ ...dbConfigFromUrl(process.env.TEST_DATABASE_URL!), connectionLimit: N });
+    try {
+      let arrived = 0;
+      let release!: () => void;
+      const barrier = new Promise<void>((r) => (release = r));
+      const seen = await Promise.all(
+        Array.from({ length: N }, () =>
+          client.$transaction(async (tx) => {
+            const rows = await tx.$queryRaw<{ id: number | bigint; t: number | bigint }[]>`SELECT CONNECTION_ID() AS id, @@SESSION.innodb_lock_wait_timeout AS t`;
+            if (++arrived === N) release();
+            await barrier; // 모든 트랜잭션이 조회를 마칠 때까지 연결을 점유한다
+            return { id: Number(rows[0]?.id), t: Number(rows[0]?.t) };
+          }, { maxWait: 10_000, timeout: 15_000 }),
+        ),
+      );
+      expect(new Set(seen.map((s) => s.id)).size, JSON.stringify(seen)).toBe(N);
+      for (const s of seen) expect(s.t, JSON.stringify(s)).toBe(2);
+    } finally {
+      await client.$disconnect();
+    }
+  }, 20_000);
 
   it("한국어와 이모지를 그대로 저장한다(utf8mb4)", async () => {
     await prisma!.chatSession.create({ data: { id: "00000000-0000-4000-8000-000000000002", userId: "u", channel: "test" } });
