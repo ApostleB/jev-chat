@@ -1,0 +1,73 @@
+import { randomUUID } from "node:crypto";
+import type { CompletedTurn, EngineResult, TraceRecord } from "../../core";
+import type { TurnRow } from "../../adapters/persistence/turn.repository";
+import type { TurnStore } from "./turn-store";
+
+/** 단위 테스트 전용 TurnStore. 실제 동작은 TurnRepository 통합 테스트로 검증한다. */
+export class InMemoryTurnStore implements TurnStore {
+  readonly sessions = new Map<string, { id: string; userId: string; next: number }>();
+  readonly turns: TurnRow[] = [];
+  readonly traces = new Map<string, TraceRecord>();
+  failComplete = false;
+  /** [B1] 지정한 메서드가 예외를 던지게 한다 */
+  throwOn = new Set<string>();
+  /** [B2] failTurn 직전에 실행(경합 재현용) */
+  beforeFail: (() => void) | null = null;
+  readonly calls: string[] = [];
+
+  async createSession(userId: string, _channel: string) {
+    const id = randomUUID();
+    this.sessions.set(id, { id, userId, next: 1 });
+    return { id };
+  }
+  async findSession(id: string) {
+    this.calls.push("findSession");
+    if (this.throwOn.has("findSession")) throw new Error("db down");
+    const s = this.sessions.get(id);
+    return s ? { id: s.id, userId: s.userId } : null;
+  }
+  async findTurnByClientMsgId(sessionId: string, clientMsgId: string) {
+    return this.turns.find((t) => t.sessionId === sessionId && t.clientMsgId === clientMsgId) ?? null;
+  }
+  async reserveTurn(input: { sessionId: string; clientMsgId: string; userText: string; retryOfTurnSeq?: number }) {
+    const s = this.sessions.get(input.sessionId)!;
+    const row: TurnRow = {
+      id: randomUUID(), sessionId: input.sessionId, turnSeq: s.next++, clientMsgId: input.clientMsgId, userText: input.userText,
+      status: "processing", errorCode: null, errorRetryable: null, assistantText: null, route: null, sources: null, traceId: null, createdAt: new Date(),
+    };
+    this.turns.push(row);
+    return row;
+  }
+  async completeTurn(turnId: string, result: EngineResult) {
+    if (this.failComplete) throw new Error("db down");
+    const t = this.turns.find((x) => x.id === turnId);
+    if (!t || t.status !== "processing") return null;
+    const traceId = randomUUID();
+    Object.assign(t, {
+      status: "completed", assistantText: result.text, route: result.route, sources: result.sources, traceId,
+      errorCode: result.route === "error" ? (result.trace.errorCode ?? "JEV_UNAVAILABLE") : null,
+      errorRetryable: result.route === "error" ? true : null,
+    });
+    this.traces.set(traceId, result.trace);
+    return { traceId };
+  }
+  async failTurn(turnId: string, code: string, retryable: boolean) {
+    this.beforeFail?.();
+    const t = this.turns.find((x) => x.id === turnId);
+    if (!t || t.status !== "processing") return false;
+    Object.assign(t, { status: "failed", errorCode: code, errorRetryable: retryable });
+    return true;
+  }
+  async listTurns(sessionId: string, opts: { beforeTurnSeq?: number; limit: number }) {
+    this.calls.push("listTurns");
+    const all = this.turns.filter((t) => t.sessionId === sessionId && (!opts.beforeTurnSeq || t.turnSeq < opts.beforeTurnSeq)).sort((a, b) => a.turnSeq - b.turnSeq);
+    return { turns: all.slice(-opts.limit), hasMore: all.length > opts.limit };
+  }
+  async loadCompletedTurns(sessionId: string, beforeTurnSeq: number, limit: number): Promise<CompletedTurn[]> {
+    return this.turns
+      .filter((t) => t.sessionId === sessionId && t.status === "completed" && t.turnSeq < beforeTurnSeq)
+      .sort((a, b) => a.turnSeq - b.turnSeq)
+      .slice(-limit)
+      .map((t) => ({ turnSeq: t.turnSeq, userText: t.userText, assistantText: t.assistantText ?? "", sources: (t.sources ?? []).map((s) => ({ title: s.title, section: s.section })) }));
+  }
+}

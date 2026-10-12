@@ -698,7 +698,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - 큐 만료 [B4]: enqueue 시 `queueMs` 타이머. 실행 전에 만료되면 `failTurn(QUEUE_TIMEOUT, true)`(true일 때만 `chat:error`), 슬롯·진행 목록을 즉시 정확히 한 번 반환, 나중에 차례가 와도 실행하지 않는다.
 - 처리: 활성 지식 없음 / 엔진 예외 → `failTurn(INTERNAL, false)`. 정상 → `completeTurn(saveMs)` 확인 후 room에 `chat:done`, 그리고 **항상** `events.trace()`(수신 소켓 debug 필터는 Gateway)[B8]. 저장 실패 → `failTurn(INTERNAL, false)` 후 `chat:error`. 모든 경로에서 슬롯·진행 목록 정확히 한 번 반환.
 
-- [ ] **Step 1: 테스트용 인메모리 저장소 작성**
+- [x] **Step 1: 테스트용 인메모리 저장소 작성**
 
 `jev-chat-api/src/app/chat/in-memory-turn-store.ts`:
 ```ts
@@ -778,7 +778,7 @@ export class InMemoryTurnStore implements TurnStore {
 ```
 (`build:exclude` — `tsconfig.build.json`의 `exclude`에 `"src/app/chat/in-memory-turn-store.ts"` 추가)
 
-- [ ] **Step 2: 실패 테스트 작성**
+- [x] **Step 2: 실패 테스트 작성**
 
 `jev-chat-api/src/app/chat/chat.service.spec.ts`:
 ```ts
@@ -1034,12 +1034,12 @@ describe("ChatService", () => {
 });
 ```
 
-- [ ] **Step 3: 실행 → 실패 확인**
+- [x] **Step 3: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- chat.service`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 4: 구현**
+- [x] **Step 4: 구현**
 
 `jev-chat-api/src/app/chat/chat.service.ts`:
 ```ts
@@ -1307,12 +1307,12 @@ export class ChatService {
 ```
 ※ 중복 재전송은 새 요청 레이트 리밋 대신 `replayLimiter`(분당 30)만 적용한다[B7]. trace 수신 필터는 Gateway 책임이다[B8].
 
-- [ ] **Step 5: 실행 → 통과 확인**
+- [x] **Step 5: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test -- chat.service && pnpm --filter jev-chat-api typecheck`
 Expected: PASS (15건)
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add jev-chat-api
