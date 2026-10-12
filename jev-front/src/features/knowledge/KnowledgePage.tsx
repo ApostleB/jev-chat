@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { KnowledgeChunkItemSchema, KnowledgeFaqItemSchema, ReloadResponseSchema } from "@jev-chat/protocol";
 import { toast } from "sonner";
 import { captureAuthGeneration } from "@/lib/auth-generation";
@@ -54,11 +54,19 @@ function ChunkTab({ enabled, authEpoch }: { enabled: boolean; authEpoch: number 
 }
 
 export function KnowledgePage({ enabled, authEpoch }: { enabled: boolean; authEpoch: number }) {
+  const queryClient = useQueryClient();
   const reload = useMutation({
     mutationFn: () => api.post("/api/admin/knowledge/reload", undefined, ReloadResponseSchema),
     onMutate: () => ({ isCurrent: captureAuthGeneration() }),
     onSuccess: (r, _v, ctx) => {
-      if (ctx?.isCurrent()) toast(r.changed ? "새 버전을 적용했습니다." : "변경 사항이 없습니다."); // [F2] 인증 세대가 지났으면 무시
+      if (!ctx?.isCurrent()) return; // [F2] 인증 세대가 지났으면 무시
+      toast(r.changed ? "새 버전을 적용했습니다." : "변경 사항이 없습니다.");
+      if (r.changed) {
+        // [S1] 활성 지식이 바뀌었으므로 목록·설정 캐시를 무효화한다(queryKey 첫 원소 prefix 일치)
+        void queryClient.invalidateQueries({ queryKey: ["knowledge-faqs"] });
+        void queryClient.invalidateQueries({ queryKey: ["knowledge-chunks"] });
+        void queryClient.invalidateQueries({ queryKey: ["config"] });
+      }
     },
     onError: (e, _v, ctx) => {
       if (ctx?.isCurrent()) toast.error(errorText(e));

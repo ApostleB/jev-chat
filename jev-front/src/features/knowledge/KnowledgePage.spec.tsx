@@ -2,7 +2,10 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Toaster } from "@/components/ui/sonner";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render } from "@testing-library/react";
 import { renderWithQuery, stubRest } from "@/test/rest";
+import { SettingsPage } from "../settings/SettingsPage";
 import { KnowledgePage } from "./KnowledgePage";
 
 const faq = { id: "faq-1", intent: "card", summary: "카드 요약", answer: "카드 답변", sourceChunkId: "card-001", variants: ["법인카드 쓰는 법"] };
@@ -68,5 +71,79 @@ describe("KnowledgePage — 인증 세대 [F2]", () => {
     release();
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByText("새 버전을 적용했습니다.")).toBeNull();
+  });
+});
+
+describe("KnowledgePage — 재로드 후 캐시 갱신 [S1]", () => {
+  const config = { knowledgeVersionId: "v1", packName: "mini-test", packVersion: "1", model: "m", templateVersion: "t", policy: null };
+  const setup = (changed: boolean) => {
+    const { calls } = stubRest((u, init) => {
+      if (u.pathname === "/api/knowledge/faqs") return { status: 200, body: { items: [faq], nextCursor: null } };
+      if (u.pathname === "/api/knowledge/chunks") return { status: 200, body: { items: [chunk], nextCursor: null } };
+      if (u.pathname === "/api/admin/config") return { status: 200, body: config };
+      if (u.pathname === "/api/admin/knowledge/reload" && init?.method === "POST") return { status: 201, body: { versionId: "v2", changed } };
+      return undefined;
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <KnowledgePage enabled authEpoch={0} />
+        <SettingsPage token="t" authEpoch={0} onSave={() => {}} onLogout={() => {}} />
+        <Toaster />
+      </QueryClientProvider>,
+    );
+    return calls;
+  };
+  const count = (calls: { path: string }[], p: string) => calls.filter((c) => c.path === p).length;
+
+  it("changed=true면 FAQ 목록과 config를 다시 요청한다", async () => {
+    const calls = setup(true);
+    await screen.findByText("카드 요약");
+    await vi.waitFor(() => expect(count(calls, "/api/admin/config")).toBe(1));
+    await userEvent.click(screen.getByRole("button", { name: "활성 지식 인덱스 다시 로드" }));
+    await vi.waitFor(() => expect(count(calls, "/api/knowledge/faqs")).toBe(2));
+    await vi.waitFor(() => expect(count(calls, "/api/admin/config")).toBe(2));
+  });
+
+  it("changed=true면 청크 목록도 다시 요청한다", async () => {
+    const calls = setup(true);
+    await userEvent.click(await screen.findByRole("tab", { name: "청크" }));
+    await screen.findByText("<b>본문</b>");
+    await userEvent.click(screen.getByRole("button", { name: "활성 지식 인덱스 다시 로드" }));
+    await vi.waitFor(() => expect(count(calls, "/api/knowledge/chunks")).toBe(2));
+  });
+
+  it("changed=false면 다시 요청하지 않는다", async () => {
+    const calls = setup(false);
+    await screen.findByText("카드 요약");
+    await vi.waitFor(() => expect(count(calls, "/api/admin/config")).toBe(1));
+    await userEvent.click(screen.getByRole("button", { name: "활성 지식 인덱스 다시 로드" }));
+    await vi.waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(count(calls, "/api/knowledge/faqs")).toBe(1);
+    expect(count(calls, "/api/admin/config")).toBe(1);
+  });
+
+  it("인증 세대가 지난 뒤 성공하면 invalidate하지 않는다", async () => {
+    const { markAuthChanged } = await import("@/lib/auth-generation");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      const u = new URL(url);
+      calls.push(u.pathname);
+      if (u.pathname === "/api/admin/knowledge/reload" && init?.method === "POST") {
+        await gate;
+        return new Response(JSON.stringify({ versionId: "v2", changed: true }), { status: 201, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ items: [faq], nextCursor: null }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    renderWithQuery(<KnowledgePage enabled authEpoch={0} />);
+    await screen.findByText("카드 요약");
+    await userEvent.click(screen.getByRole("button", { name: "활성 지식 인덱스 다시 로드" }));
+    markAuthChanged();
+    release();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.filter((p) => p === "/api/knowledge/faqs")).toHaveLength(1);
   });
 });
