@@ -104,30 +104,35 @@ describe.runIf(prisma)("TurnRepository (통합)", () => {
   it("[P5·P9] 저장 기한을 넘기면 트랜잭션이 롤백되고 늦은 완료가 남지 않는다", async () => {
     const s = await repo.createSession("u1", "front-test");
     const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });
-    // 다른 트랜잭션이 턴 행을 2.5초 동안 잠근다 → completeTurn(saveMs 3000)은 잠금 대기 중 기한 초과.
+    // 다른 트랜잭션이 턴 행을 4.5초 동안 잠근다(saveMs보다 길다) → completeTurn(saveMs 3000)은 잠금 대기 중이며,
+    // DB 세션의 잠금 대기 제한(2초)이 없으면 holder가 끝날 때까지(약 4.5초) reject되지 않는다.
     // holder가 FOR UPDATE로 잠금을 얻은 뒤에만 completeTurn을 시작한다(barrier).
     let locked!: () => void;
     const lockAcquired = new Promise<void>((r) => (locked = r));
     const holder = prisma!.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM chat_turns WHERE id = ${t.id} FOR UPDATE`;
       locked();
-      await new Promise((r) => setTimeout(r, 2500));
-    }, { timeout: 5000 });
-    await lockAcquired;
-    // 운영 기본 saveMs(3000)에서 DB 잠금 대기 2초가 실제 상한을 보장함을 검증
+      await new Promise((r) => setTimeout(r, 4500));
+    }, { timeout: 8000 });
+    holder.catch(() => {}); // 잠금 전 실패 시에도 unhandled rejection이 되지 않게 한다(아래 await에서 다시 던져짐)
+    const endedEarly = holder.then(() => {
+      throw new Error("holder가 잠금 전에 종료");
+    });
+    endedEarly.catch(() => {});
+    await Promise.race([lockAcquired, endedEarly]);
+    // 운영 기본 saveMs(3000)에서 DB 잠금 대기 2초가 실제 상한을 보장함을 검증 (holder는 saveMs보다 오래 잠금을 쥔다)
     const saveMs = 3000;
     const startedAt = Date.now();
     await expect(repo.completeTurn(t.id, result("늦은 답"), { saveMs })).rejects.toThrow();
     const elapsed = Date.now() - startedAt;
-    console.info(`[B1] 느린 저장 reject까지 ${elapsed}ms (상한 ${saveMs + 1000}ms)`);
     // DB 세션의 행 잠금 대기 제한(2초)이 실제 상한이다
-    expect(elapsed).toBeLessThanOrEqual(saveMs + 1000);
-    expect(elapsed).toBeLessThanOrEqual(saveMs);
+    expect(elapsed, `elapsed=${elapsed}ms`).toBeLessThanOrEqual(saveMs + 1000);
+    expect(elapsed, `elapsed=${elapsed}ms`).toBeLessThanOrEqual(saveMs);
     await holder;
     await new Promise((r) => setTimeout(r, 500));
     expect(await repo.findTurnByClientMsgId(s.id, uuid(1))).toMatchObject({ status: "processing", assistantText: null, traceId: null });
     expect(await prisma!.messageTrace.count({ where: { turnId: t.id } })).toBe(0);
-  });
+  }, 10_000);
 
   it("failTurn은 processing일 때만 실패로 바꾼다", async () => {
     const s = await repo.createSession("u1", "front-test");
