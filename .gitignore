@@ -34,3 +34,4 @@ eval-from-reviews*.jsonl
 
 # 평가 리포트(holdout 점수 포함, 로컬 전용)
 jev-chat-api/eval-reports/
+!jev-front/src/features/logs/
