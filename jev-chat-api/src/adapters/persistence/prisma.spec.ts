@@ -34,15 +34,17 @@ describe.runIf(prisma)("Prisma 스키마 (통합)", () => {
       const seen = await Promise.all(
         Array.from({ length: N }, () =>
           client.$transaction(async (tx) => {
-            const rows = await tx.$queryRaw<{ id: number | bigint; t: number | bigint }[]>`SELECT CONNECTION_ID() AS id, @@SESSION.innodb_lock_wait_timeout AS t`;
+            const rows = await tx.$queryRaw<{ id: number | bigint; t: number | bigint; tz: string }[]>`SELECT CONNECTION_ID() AS id, @@SESSION.innodb_lock_wait_timeout AS t, @@SESSION.time_zone AS tz`;
             if (++arrived === N) release();
             await barrier; // 모든 트랜잭션이 조회를 마칠 때까지 연결을 점유한다
-            return { id: Number(rows[0]?.id), t: Number(rows[0]?.t) };
+            return { id: Number(rows[0]?.id), t: Number(rows[0]?.t), tz: String(rows[0]?.tz) };
           }, { maxWait: 10_000, timeout: 15_000 }),
         ),
       );
       expect(new Set(seen.map((s) => s.id)).size, JSON.stringify(seen)).toBe(N);
       for (const s of seen) expect(s.t, JSON.stringify(s)).toBe(2);
+      // [M-5] NOW(3)·DATETIME 해석이 서버 설정에 흔들리지 않도록 모든 연결의 세션 시간대는 UTC
+      for (const s of seen) expect(s.tz, JSON.stringify(s)).toBe("+00:00");
     } finally {
       await client.$disconnect();
     }

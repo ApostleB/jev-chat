@@ -26,7 +26,7 @@ export function createPrismaClient(db: DbConfig): PrismaClient {
     database: db.database,
     connectionLimit: db.connectionLimit,
     connectTimeout: 5000,
-    initSql: `SET SESSION innodb_lock_wait_timeout=${DB_LOCK_WAIT_TIMEOUT_SECONDS}`,
+    initSql: [`SET SESSION innodb_lock_wait_timeout=${DB_LOCK_WAIT_TIMEOUT_SECONDS}`, "SET SESSION time_zone='+00:00'"],
   });
   return new PrismaClient({ adapter });
 }
