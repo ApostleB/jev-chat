@@ -95,6 +95,18 @@ describe("loadDomainPack", () => {
     await expect(loadDomainPack(dir)).rejects.toBeInstanceOf(PackValidationError);
   });
 
+  it("save_ms 경계: 2999는 거부(메시지에 save_ms), 3000은 통과", async () => {
+    const dir = copyMini();
+    const pp = join(dir, "policy.yaml");
+    const orig = readFileSync(pp, "utf8");
+    writeFileSync(pp, orig.replace("save_ms: 3000", "save_ms: 2999"));
+    const err = await loadDomainPack(dir).catch((e) => e);
+    expect(err).toBeInstanceOf(PackValidationError);
+    expect(String(err.message)).toContain("save_ms");
+    writeFileSync(pp, orig.replace("save_ms: 3000", "save_ms: 3000"));
+    await expect(loadDomainPack(dir)).resolves.toMatchObject({ policy: { deadlines: { saveMs: 3000 } } });
+  });
+
   it("jsonl 형식 오류는 파일명과 줄 번호를 알려준다", async () => {
     const dir = copyMini();
     writeFileSync(join(dir, "chunks.jsonl"), '{"id":"x"}\n{broken\n');

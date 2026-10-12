@@ -115,12 +115,11 @@ export class TurnRepository implements ContextReader {
 
   /**
    * [P5] 저장 기한(saveMs, 기본 3000ms)을 트랜잭션 획득 대기 + 실행 시간에 나눠 적용한다.
-   * 주의: Prisma 트랜잭션 timeout은 진행 중인 쿼리를 취소하지 않는다. 행 잠금 대기 중이면 그 쿼리가 끝날 때
-   * (최대 innodb_lock_wait_timeout)까지 promise가 reject되지 않는다. 다만 기한 초과 트랜잭션은 커밋되지 않으므로 늦은 완료는 남지 않는다.
-   * 실제 시간 상한은 계획 2B에서 결정(DB 확인 후).
+   * 논리 tx 예산(maxWait+timeout)과 별도로, 행 잠금 대기는 DB 세션 설정(innodb_lock_wait_timeout=2초, prisma.ts)으로 2초에서 끊긴다.
+   * 그 외의 장기 쿼리 상한은 계획 2B에서 다룬다. 기한 초과 트랜잭션은 커밋되지 않으므로 늦은 완료는 남지 않는다.
    */
   private txOptions(saveMs = 3000): { maxWait: number; timeout: number } {
-    // saveMs는 팩 검증에서 1000 이상이 보장된다. 합계(maxWait+timeout)가 saveMs를 넘지 않게 나눈다.
+    // saveMs는 팩 검증에서 3000 이상 보장(DB 잠금 대기 2초 + 롤백 여유). 합계(maxWait+timeout)가 saveMs를 넘지 않게 나눈다.
     const budget = Math.max(1000, saveMs);
     const maxWait = Math.min(1000, Math.floor(budget / 3));
     return { maxWait, timeout: budget - maxWait };

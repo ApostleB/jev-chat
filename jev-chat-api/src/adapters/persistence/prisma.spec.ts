@@ -23,6 +23,14 @@ describe.runIf(prisma)("Prisma 스키마 (통합)", () => {
     await expect(prisma!.chatTurn.create({ data: { ...base, turnSeq: 2, clientMsgId: "00000000-0000-4000-8000-0000000000a1" } })).rejects.toThrow();
   });
 
+  it("[저장 기한] 모든 연결의 행 잠금 대기 제한이 2초다", async () => {
+    // 풀의 여러 연결이 모두 initSql을 적용받는지 보도록 동시에 여러 번 조회한다
+    const rows = await Promise.all(
+      [1, 2, 3, 4, 5].map(() => prisma!.$queryRaw<{ t: number | bigint }[]>`SELECT @@SESSION.innodb_lock_wait_timeout AS t`),
+    );
+    for (const r of rows) expect(Number(r[0]?.t)).toBe(2);
+  });
+
   it("한국어와 이모지를 그대로 저장한다(utf8mb4)", async () => {
     await prisma!.chatSession.create({ data: { id: "00000000-0000-4000-8000-000000000002", userId: "u", channel: "test" } });
     const t = await prisma!.chatTurn.create({

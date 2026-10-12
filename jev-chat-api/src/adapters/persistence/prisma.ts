@@ -10,6 +10,13 @@ export interface DbConfig {
   connectionLimit: number;
 }
 
+/**
+ * 모든 DB 연결의 행 잠금 대기 상한(초). 저장 기한(saveMs)의 실제 상한을 만든다.
+ * Prisma 트랜잭션 timeout은 진행 중인 쿼리를 취소하지 않으므로, DB 쪽에서 행 잠금 대기 자체를 끊는다.
+ * (env 설정으로 노출하지 않는다.)
+ */
+export const DB_LOCK_WAIT_TIMEOUT_SECONDS = 2;
+
 export function createPrismaClient(db: DbConfig): PrismaClient {
   const adapter = new PrismaMariaDb({
     host: db.host,
@@ -19,6 +26,7 @@ export function createPrismaClient(db: DbConfig): PrismaClient {
     database: db.database,
     connectionLimit: db.connectionLimit,
     connectTimeout: 5000,
+    initSql: `SET SESSION innodb_lock_wait_timeout=${DB_LOCK_WAIT_TIMEOUT_SECONDS}`,
   });
   return new PrismaClient({ adapter });
 }

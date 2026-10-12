@@ -23,7 +23,7 @@ export const PolicySchema = z.object({
   // [P8] 대화 문맥은 축소하지 않으므로 안전한 상한을 둔다
   context: z.object({ max_turns: PosInt.max(3), assistant_max_chars: PosInt.max(500) }),
   // [P10] 제한기 대기(limiter_ms)는 서버 설정(JEV_LIMITER_WAIT_MS)이라 팩에 두지 않는다
-  deadlines: z.object({ engine_ms: PosInt, queue_ms: PosInt, save_ms: PosInt.min(1000, "save_ms는 1000 이상(트랜잭션 대기+실행 분할 하한)") }).strict(),
+  deadlines: z.object({ engine_ms: PosInt, queue_ms: PosInt, save_ms: PosInt.min(3000, "save_ms는 3000 이상(DB 잠금 대기 2초 + 롤백 여유)") }).strict(),
 });
 
 export const IntentsSchema = z
