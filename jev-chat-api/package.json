@@ -17,6 +17,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "knowledge:import": "tsx src/scripts/knowledge-import.ts",
+    "eval": "tsx src/eval/cli.ts",
     "eval:export-reviews": "tsx src/scripts/export-reviews.ts"
   },
   "dependencies": {

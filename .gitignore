@@ -31,3 +31,6 @@ jev-chat-api/src/generated/
 
 # 검수 내보내기 산출물 — 질문 원문·메모 포함(공개 저장소 커밋 금지)
 eval-from-reviews*.jsonl
+
+# 평가 리포트(holdout 점수 포함, 로컬 전용)
+jev-chat-api/eval-reports/
