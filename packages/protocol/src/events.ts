@@ -59,18 +59,27 @@ export const SessionStartRequestSchema = z.object({
 });
 export type SessionStartRequest = z.infer<typeof SessionStartRequestSchema>;
 
-export const SessionStartResponseSchema = z
-  .object({
-    sessionId: UuidSchema,
-    turns: z.array(TurnSchema),
-    hasMore: z.boolean(),
-    nextBeforeTurnSeq: TurnSeqSchema.optional(),
-  })
-  .superRefine((r, ctx) => {
-    if (r.hasMore && r.nextBeforeTurnSeq === undefined) {
-      ctx.addIssue({ code: "custom", path: ["nextBeforeTurnSeq"], message: "hasMore=true면 nextBeforeTurnSeq가 필요합니다." });
+/** 턴 페이지 공통 필드: turn_seq 오름차순, 최대 50개 */
+export const TURN_PAGE_MAX = 50;
+export const turnPageShape = {
+  turns: z.array(TurnSchema).max(TURN_PAGE_MAX),
+  hasMore: z.boolean(),
+  nextBeforeTurnSeq: TurnSeqSchema.optional(),
+};
+/** 턴 페이지 공통 규칙(소켓 session:start 응답과 REST 턴 목록이 공유): hasMore=true면 nextBeforeTurnSeq 필수, turns는 turnSeq 오름차순 */
+export function checkTurnPage(r: { turns: Array<{ turnSeq: number }>; hasMore: boolean; nextBeforeTurnSeq?: number | undefined }, ctx: z.RefinementCtx): void {
+  if (r.hasMore && r.nextBeforeTurnSeq === undefined) {
+    ctx.addIssue({ code: "custom", path: ["nextBeforeTurnSeq"], message: "hasMore=true면 nextBeforeTurnSeq가 필요합니다." });
+  }
+  for (let i = 1; i < r.turns.length; i++) {
+    if (r.turns[i]!.turnSeq <= r.turns[i - 1]!.turnSeq) {
+      ctx.addIssue({ code: "custom", path: ["turns", i], message: "turns는 turnSeq 오름차순이어야 합니다." });
+      break;
     }
-  });
+  }
+}
+
+export const SessionStartResponseSchema = z.object({ sessionId: UuidSchema, ...turnPageShape }).superRefine(checkTurnPage);
 export type SessionStartResponse = z.infer<typeof SessionStartResponseSchema>;
 
 export const ChatSendRequestSchema = z.object({

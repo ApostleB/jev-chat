@@ -8,6 +8,7 @@ import {
   MessageTextSchema,
   RouteSchema,
   SessionStartResponseSchema,
+  TurnPageSchema,
   TurnSchema,
   isWithinPayloadLimit,
   MAX_PAYLOAD_BYTES,
@@ -140,6 +141,22 @@ describe("SessionStartResponseSchema 페이지 커서", () => {
   it("hasMore=true인데 nextBeforeTurnSeq가 없으면 거부한다", () => {
     expect(SessionStartResponseSchema.safeParse({ sessionId: uuid, turns: [], hasMore: true }).success).toBe(false);
     expect(SessionStartResponseSchema.safeParse({ sessionId: uuid, turns: [], hasMore: true, nextBeforeTurnSeq: 5 }).success).toBe(true);
+  });
+});
+
+describe("TurnPageSchema (REST 턴 목록)", () => {
+  const turn = (n: number) => ({ turnId: `t${n}`, turnSeq: n, clientMsgId: uuid, userText: "q", status: "processing" as const });
+  it("hasMore=true면 nextBeforeTurnSeq 필수 — session:start 응답과 같은 규칙", () => {
+    expect(TurnPageSchema.safeParse({ turns: [], hasMore: true }).success).toBe(false);
+    expect(TurnPageSchema.safeParse({ turns: [turn(6)], hasMore: true, nextBeforeTurnSeq: 6 }).success).toBe(true);
+    expect(TurnPageSchema.safeParse({ turns: [turn(1)], hasMore: false }).success).toBe(true);
+  });
+  it("turnSeq 오름차순과 최대 50개를 강제한다(session:start 응답 공통)", () => {
+    expect(TurnPageSchema.safeParse({ turns: [turn(2), turn(1)], hasMore: false }).success).toBe(false);
+    const many = Array.from({ length: 51 }, (_, i) => turn(i + 1));
+    expect(TurnPageSchema.safeParse({ turns: many, hasMore: false }).success).toBe(false);
+    expect(SessionStartResponseSchema.safeParse({ sessionId: uuid, turns: many, hasMore: false }).success).toBe(false);
+    expect(SessionStartResponseSchema.safeParse({ sessionId: uuid, turns: [turn(2), turn(1)], hasMore: false }).success).toBe(false);
   });
 });
 

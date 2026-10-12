@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { AdminConfigSchema, ApiErrorSchema, PageSchema, ReviewQueueItemSchema, SessionSummarySchema, TraceDetailSchema } from "@jev-chat/protocol";
+import { AdminConfigSchema, ApiErrorSchema, PageSchema, ReviewQueueItemSchema, SessionSummarySchema, TraceDetailSchema, TurnPageSchema } from "@jev-chat/protocol";
 import { io } from "socket.io-client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FakeJudge, okRelevance, okTurn } from "../../core/testing/fakes";
 import { StaticTokenAuthProvider } from "../auth/static-auth.provider";
+import { createPrismaClient, dbConfigFromUrl } from "../../adapters/persistence/prisma";
+import { TurnRepository } from "../../adapters/persistence/turn.repository";
 import { createTestApp } from "../testing/test-app";
 
 const enabled = !!process.env.TEST_DATABASE_URL;
@@ -65,6 +67,26 @@ describe.runIf(enabled)("REST E2E (통합)", () => {
     expect((await get(`/api/sessions/${aliceSession}/turns`, "alice")).status).toBe(200);
     expect((await get(`/api/sessions/${aliceSession}/turns`, "bob")).status).toBe(403);
     expect((await get(`/api/sessions/${randomUUID()}/turns`, "alice")).status).toBe(404);
+  });
+
+  it("[I-2] 턴 목록은 TurnPageSchema를 따르고 nextBeforeTurnSeq로 다음 페이지를 왕복한다", async () => {
+    const prisma = createPrismaClient(dbConfigFromUrl(process.env.TEST_DATABASE_URL!));
+    try {
+      const repo = new TurnRepository(prisma);
+      const { id } = await repo.createSession("alice", "front-test");
+      for (let i = 1; i <= 55; i++) await repo.reserveTurn({ sessionId: id, clientMsgId: randomUUID(), userText: `질문 ${i}` });
+      const first = TurnPageSchema.parse(await (await get(`/api/sessions/${id}/turns`, "alice")).json());
+      expect(first.turns).toHaveLength(50);
+      expect(first.turns[0]?.turnSeq).toBe(6);
+      expect(first.turns.at(-1)?.turnSeq).toBe(55);
+      expect(first).toMatchObject({ hasMore: true, nextBeforeTurnSeq: 6 });
+      const second = TurnPageSchema.parse(await (await get(`/api/sessions/${id}/turns?beforeTurnSeq=${first.nextBeforeTurnSeq}`, "alice")).json());
+      expect(second.turns.map((t) => t.turnSeq)).toEqual([1, 2, 3, 4, 5]);
+      expect(second.hasMore).toBe(false);
+      expect(second.nextBeforeTurnSeq).toBeUndefined();
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   it("trace: debug + 세션 접근 권한 둘 다 필요", async () => {

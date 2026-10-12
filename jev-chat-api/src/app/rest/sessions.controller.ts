@@ -1,6 +1,6 @@
 import { Controller, Get, Inject, Param, Query, UseGuards } from "@nestjs/common";
 import { z } from "zod";
-import type { Page, SessionSummary, Turn } from "@jev-chat/protocol";
+import type { Page, SessionSummary, TurnPage } from "@jev-chat/protocol";
 import { TurnRepository } from "../../adapters/persistence/turn.repository";
 import { canReadSession, hasRole } from "../auth/access";
 import type { AuthedPrincipal } from "../auth/auth.types";
@@ -33,7 +33,7 @@ export class SessionsController {
   }
 
   @Get(":id/turns")
-  async turnsOf(@CurrentPrincipal() p: AuthedPrincipal, @Param("id") id: string, @Query() query: unknown): Promise<{ turns: Turn[]; hasMore: boolean }> {
+  async turnsOf(@CurrentPrincipal() p: AuthedPrincipal, @Param("id") id: string, @Query() query: unknown): Promise<TurnPage> {
     if (!z.uuid().safeParse(id).success) throw new ApiException("NOT_FOUND");
     const q = TurnsQuery.safeParse(query);
     if (!q.success) throw new ApiException("INVALID_INPUT");
@@ -41,6 +41,7 @@ export class SessionsController {
     if (!s) throw new ApiException("NOT_FOUND");
     if (!canReadSession(p, s.userId)) throw new ApiException("FORBIDDEN");
     const page = await this.turns.listTurns(id, { limit: 50, ...(q.data.beforeTurnSeq ? { beforeTurnSeq: q.data.beforeTurnSeq } : {}) });
-    return { turns: page.turns.map(toProtocolTurn), hasMore: page.hasMore };
+    const first = page.turns[0];
+    return { turns: page.turns.map(toProtocolTurn), hasMore: page.hasMore, ...(page.hasMore && first ? { nextBeforeTurnSeq: first.turnSeq } : {}) };
   }
 }

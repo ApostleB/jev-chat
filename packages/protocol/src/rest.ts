@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ErrorCodeSchema, RouteSchema } from "./common";
+import { checkTurnPage, turnPageShape } from "./events";
 
 export function PageSchema<T extends z.ZodType>(item: T) {
   return z.object({ items: z.array(item), nextCursor: z.string().nullable() });
@@ -20,6 +21,10 @@ export const SessionSummarySchema = z.object({
   turnCount: z.number().int().nonnegative(),
 });
 export type SessionSummary = z.infer<typeof SessionSummarySchema>;
+
+/** GET /api/sessions/:id/turns 응답. turns는 turn_seq 오름차순(최대 50), hasMore=true면 nextBeforeTurnSeq 필수 */
+export const TurnPageSchema = z.object(turnPageShape).superRefine(checkTurnPage);
+export type TurnPage = z.infer<typeof TurnPageSchema>;
 
 export const VerdictSchema = z.enum(["correct", "wrong", "partial"]);
 
