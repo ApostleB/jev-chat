@@ -13,7 +13,7 @@ describe("AdminController.reload", () => {
     }
     const snapshots = { reload: async () => { throw new DbDown("password=secret host=10.0.0.1"); } };
     const ctrl = new AdminController(snapshots as never, {} as never, new SlidingWindowRateLimiter(30, 60_000));
-    await expect(ctrl.reload({ userId: "root", roles: ["admin"] } as never)).rejects.toMatchObject({ code: "INTERNAL" });
+    await expect(ctrl.reload({ userId: "root", roles: ["admin"] } as never)).rejects.toMatchObject({ response: { error: { code: "INTERNAL" } } });
     expect(error).toHaveBeenCalledTimes(1);
     const logged = String(error.mock.calls[0]?.[0]);
     expect(logged).toContain("DbDown");
