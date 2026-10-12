@@ -1754,7 +1754,7 @@ describe.runIf(prisma)("Prisma 스키마 (통합)", () => {
 Run: `pnpm --filter jev-chat-api db:migrate --name init`
 Expected: `prisma/migrations/<timestamp>_init/migration.sql` 생성, 개발 DB에 적용
 
-- [ ] **Step 7: 통합 테스트 실행**
+- [x] **Step 7: 통합 테스트 실행**
 
 Run: `TEST_DATABASE_URL=<사용자가 알려준 테스트 DB URL> pnpm --filter jev-chat-api test -- persistence/prisma`
 Expected: PASS 3 (TEST_DATABASE_URL 없이 실행하면 통합 2건은 skip, URL 단위 테스트 1건만 PASS)
@@ -2406,7 +2406,7 @@ async function main(): Promise<void> {
 void main();
 ```
 
-- [ ] **Step 8: 실행 → 통과 확인**
+- [x] **Step 8: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test -- knowledge` (단위) 그리고 `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test -- knowledge.repository` (통합)
 Expected: 로더 7건 PASS, 저장소 통합 4건 PASS (URL 없으면 skip)
@@ -3170,7 +3170,7 @@ describe.runIf(url)("앱 부팅 (통합)", () => {
 });
 ```
 
-- [ ] **Step 6: 실행 → 통과 확인**
+- [x] **Step 6: 실행 → 통과 확인**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` 그리고 `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test`
 Expected: 스냅샷 9건 PASS, 턴 저장소 통합 11건 PASS, 앱 부팅 1건 PASS(URL 없으면 통합은 skip), core 회귀 없음

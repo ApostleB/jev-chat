@@ -81,6 +81,8 @@ describe.runIf(prisma)("KnowledgeRepository (통합)", () => {
     const pack = await loadDomainPack(MINI);
     const v1 = await repo.importPack(pack);
     // 로더를 우회해 DB 제약(VARCHAR(1000))을 넘는 변형 문장을 넣는다
+    const mode = await prisma!.$queryRaw<{ m: string }[]>`SELECT @@SESSION.sql_mode AS m`;
+    expect(mode[0]?.m, "테스트 DB의 sql_mode는 STRICT_TRANS_TABLES 또는 STRICT_ALL_TABLES여야 한다").toMatch(/STRICT_(TRANS|ALL)_TABLES/);
     const broken = { ...pack, contentHash: "e".repeat(64), faqs: pack.faqs.map((f) => ({ ...f, variants: ["가".repeat(1001)] })) };
     await expect(repo.importPack(broken)).rejects.toThrow();
     expect((await repo.loadActive())?.versionId).toBe(v1.versionId);

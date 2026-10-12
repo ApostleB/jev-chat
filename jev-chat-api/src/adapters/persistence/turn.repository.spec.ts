@@ -4,6 +4,12 @@ import { resetTestDb, testPrisma } from "./prisma";
 import { TurnRepository } from "./turn.repository";
 
 const prisma = testPrisma();
+/** 길이 초과로 실패를 주입하는 테스트의 전제: strict SQL mode가 아니면 값이 잘려 저장되어 원인이 가려진다. */
+async function expectStrictSqlMode(): Promise<void> {
+  const rows = await prisma!.$queryRaw<{ m: string }[]>`SELECT @@SESSION.sql_mode AS m`;
+  expect(rows[0]?.m, "테스트 DB의 sql_mode는 STRICT_TRANS_TABLES 또는 STRICT_ALL_TABLES여야 한다").toMatch(/STRICT_(TRANS|ALL)_TABLES/);
+}
+
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 function result(text: string, route: EngineResult["route"] = "faq"): EngineResult {
@@ -31,6 +37,17 @@ describe.runIf(prisma)("TurnRepository (통합)", () => {
     const t2 = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(2), userText: "b", retryOfTurnSeq: 1 });
     expect([t1.turnSeq, t2.turnSeq]).toEqual([1, 2]);
     expect(t1.status).toBe("processing");
+  });
+
+  it("[R3] 같은 clientMsgId로 다시 예약하면 실패하고 next_turn_seq는 증가하지 않는다", async () => {
+    const s = await repo.createSession("u1", "front-test");
+    await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "a" });
+    const counter = async () => (await prisma!.chatSession.findUnique({ where: { id: s.id } }))?.nextTurnSeq;
+    const before = await counter();
+    await expect(repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "중복" })).rejects.toThrow();
+    expect(await counter()).toBe(before);
+    const next = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(2), userText: "b" });
+    expect(next.turnSeq).toBe(2);
   });
 
   it("동시 reserveTurn도 turn_seq가 겹치지 않는다", async () => {
@@ -67,6 +84,7 @@ describe.runIf(prisma)("TurnRepository (통합)", () => {
   it("[P9] trace 삽입이 실패하면 전체 롤백 — 턴은 processing으로 남는다", async () => {
     const s = await repo.createSession("u1", "front-test");
     const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });
+    await expectStrictSqlMode();
     const bad = result("답");
     bad.trace.knowledgeVersionId = "x".repeat(40); // CHAR(36) 초과 → trace insert 실패
     await expect(repo.completeTurn(t.id, bad)).rejects.toThrow();
