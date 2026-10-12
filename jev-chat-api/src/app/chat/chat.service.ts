@@ -149,13 +149,24 @@ export class ChatService {
         state.timer.unref?.();
         events.status({ sessionId: req.sessionId, clientMsgId: turn.clientMsgId, turnSeq: turn.turnSeq, stage: "queued" });
         // 같은 프로세스 안에서 ack가 처리 이벤트보다 먼저 나가도록 다음 매크로태스크에서 등록(네트워크 재정렬 대비 클라이언트 upsert[B3]는 유지)
-        setImmediate(() => this.deps.queue.run(req.sessionId, () => this.process(p, turn, state, events)));
+        this.defer("enqueue", () => this.deps.queue.run(req.sessionId, () => this.process(p, turn, state, events)));
         return { ok: true, data: { turnId: turn.id, turnSeq: turn.turnSeq, status: "accepted" } };
       });
     } catch (e) {
       this.log("send", e);
       return fail("INTERNAL");
     }
+  }
+
+  /** setImmediate로 넘기는 콜백의 예외가 uncaughtException이 되지 않게 감싼다 */
+  private defer(where: string, fn: () => void): void {
+    setImmediate(() => {
+      try {
+        fn();
+      } catch (e) {
+        this.log(where, e);
+      }
+    });
   }
 
   private queueMs(): number {
@@ -211,8 +222,9 @@ export class ChatService {
         : ((await this.deps.store.findTurnByClientMsgId(current.sessionId, current.clientMsgId)) ?? current);
     }
     const final = current;
-    if (final.status === "completed") queueMicrotask(() => reply.done(toDoneEvent(final, final.sessionId)));
-    else if (final.status === "failed") queueMicrotask(() => reply.error(toErrorEvent(final, final.sessionId)));
+    // duplicate ack가 먼저 나가도록 다음 macrotask에서 보낸다(queue.run과 같은 규칙). 예외는 프로세스를 죽이지 않는다.
+    if (final.status === "completed") this.defer("replay", () => reply.done(toDoneEvent(final, final.sessionId)));
+    else if (final.status === "failed") this.defer("replay", () => reply.error(toErrorEvent(final, final.sessionId)));
   }
 
   private async process(p: AuthedPrincipal, turn: TurnRow, state: QueuedTurn, events: ChatEvents): Promise<void> {

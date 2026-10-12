@@ -219,6 +219,37 @@ describe("ChatService", () => {
     expect(svc.inflightCount()).toBe(0);
   });
 
+  it("[M-2] 멱등 재발송은 duplicate ack 뒤에 보내고, reply가 던져도 uncaughtException 없이 로그만 남긴다", async () => {
+    const logs: string[] = [];
+    const store = new InMemoryTurnStore();
+    const snap = makeSnapshot({ chunks, faqs });
+    const svc = new ChatService({
+      store, snapshots: { current: () => snap }, judge: faqJudge(), queue: new SessionQueue({ capacity: 5 }),
+      sendLimiter: new SlidingWindowRateLimiter(10, 60_000), sessionLimiter: new SlidingWindowRateLimiter(20, 60_000), replayLimiter: new SlidingWindowRateLimiter(30, 60_000),
+      log: (where) => logs.push(where),
+    });
+    const sid = await session(svc);
+    const id = randomUUID();
+    await send(svc, alice, sid, "법인카드 한도 얼마예요", new Recorder(), new Recorder(), id);
+    await settle();
+    const uncaught: unknown[] = [];
+    const onUncaught = (e: unknown) => uncaught.push(e);
+    process.on("uncaughtException", onUncaught);
+    try {
+      const order: string[] = [];
+      const reply = { done: () => { order.push("replay"); throw new Error("socket gone"); }, error: () => {} };
+      const ack = await svc.send(alice, { sessionId: sid, clientMsgId: id, text: "법인카드 한도 얼마예요" }, new Recorder(), reply);
+      order.push("ack");
+      await settle();
+      expect(ack).toMatchObject({ ok: true, data: { status: "duplicate" } });
+      expect(order).toEqual(["ack", "replay"]);
+      expect(uncaught).toEqual([]);
+      expect(logs).toContain("replay");
+    } finally {
+      process.off("uncaughtException", onUncaught);
+    }
+  });
+
   it("[M-1] failTurn이 false(다른 경로가 이미 종료)면 저장된 최신 상태대로 통지한다: completed→done, failed→error, processing→무통지", async () => {
     const judge = new FakeJudge(async () => { throw new Error("bug"); }, async () => { throw new Error("bug"); });
     for (const [finalState, expected] of [["completed", "done"], ["failed", "error:RESTARTED"], ["processing", null]] as const) {
