@@ -1,7 +1,7 @@
 import { mkdir, open, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fingerprintKey, type Fingerprint } from "./fingerprint";
-import type { ItemScore } from "./score";
+import { combineRuns, type ItemScore } from "./score";
 
 export interface HoldoutResult {
   rc: string;
@@ -112,8 +112,39 @@ export function decideHoldout(
 }
 
 /** 허용된 ID만 재실행 결과로 교체한다. 원 실행의 오답·내부 실패는 그대로 남는다. */
+/** scores 파일 형식 버전. 2: { format, scores } — option_order 항목은 실행별 점수(runs)를 보존한다 [H1] */
+export const SCORES_FORMAT = 2;
+
+export function serializeScores(scores: ItemScore[]): string {
+  return JSON.stringify({ format: SCORES_FORMAT, scores });
+}
+
+/** 이전 형식(배열 등)·runs 없는 option_order 항목은 조용히 받지 않고 거부한다. */
+export function parseScoresFile(raw: string): ItemScore[] {
+  const data = JSON.parse(raw) as { format?: unknown; scores?: unknown };
+  if (Array.isArray(data) || data?.format !== SCORES_FORMAT || !Array.isArray(data.scores)) {
+    throw new Error(`scores 파일 형식이 지원되지 않습니다(필요: format ${SCORES_FORMAT}). 이전 형식 파일로는 재실행할 수 없습니다.`);
+  }
+  const scores = data.scores as ItemScore[];
+  for (const s of scores) {
+    if (s.type === "option_order" && (!Array.isArray(s.runs) || s.runs.length !== 2)) throw new Error("scores 파일의 option_order 항목에 runs(실행별 점수)가 없습니다.");
+  }
+  return scores;
+}
+
+/**
+ * 허용된 ID만 재실행 결과로 바꾼다. 원 실행의 오답·내부 실패는 그대로 남는다.
+ * option_order 항목은 공급자 실패였던 방향의 실행만 교체하고, 장애가 없던 방향의 원 점수는 유지한 채 재합성한다 [H1].
+ */
 export function mergeRerun(original: ItemScore[], rerun: ItemScore[], allowedIds: string[]): ItemScore[] {
   const allowed = new Set(allowedIds);
   const byId = new Map(rerun.map((s) => [s.id, s]));
-  return original.map((s) => (allowed.has(s.id) && byId.has(s.id) ? byId.get(s.id)! : s));
+  return original.map((s) => {
+    const r = byId.get(s.id);
+    if (!allowed.has(s.id) || !r) return s;
+    if (!s.runs) return r;
+    if (!r.runs) throw new Error(`재실행 점수에 실행별 점수(runs)가 없습니다: ${s.id}`);
+    const [a, b] = s.runs.map((o, k) => (o.failure === "provider" ? r.runs![k]! : o)) as [ItemScore, ItemScore];
+    return combineRuns(a, b);
+  });
 }

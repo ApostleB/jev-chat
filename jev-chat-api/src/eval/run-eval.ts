@@ -10,13 +10,13 @@ import { TypesafeJudge } from "../adapters/jev/typesafe-judge";
 import { loadDomainPack, type DomainPack } from "../adapters/knowledge/pack-loader";
 import type { EvalItem } from "./eval-item";
 import { evalCodeTree, fileSha256, sha256, type Fingerprint } from "./fingerprint";
-import { decideHoldout, HoldoutLedger, mergeRerun } from "./holdout-lock";
+import { decideHoldout, HoldoutLedger, mergeRerun, parseScoresFile, serializeScores } from "./holdout-lock";
 import { loadEvalSet } from "./load-set";
 import { computeMetrics } from "./metrics";
 import { buildOfflineSnapshot, ItemContextReader } from "./offline-snapshot";
 import { applyPolicyOverride } from "./policy-override";
 import { renderMarkdown } from "./report";
-import { combineOrderScores, scoreItem, type ItemScore } from "./score";
+import { combineRuns, scoreItem, type ItemScore } from "./score";
 
 type Order = "normal" | "reversed";
 
@@ -29,6 +29,8 @@ interface RunOpts {
   policy: Policy;
   concurrency?: number;
   limiterWaitMs: number;
+  /** 재실행: 원 점수. option_order는 공급자 실패였던 방향만 다시 실행하고 나머지 방향은 원 실행 점수를 재사용한다 [H1] */
+  reuse?: Map<string, ItemScore>;
 }
 
 async function runOne(o: RunOpts, item: EvalItem, judge: Judge) {
@@ -52,8 +54,18 @@ export async function runEval(o: RunOpts): Promise<ItemScore[]> {
     while (next < o.items.length) {
       const i = next++;
       const item = o.items[i]!;
-      const first = scoreItem(item, await runOne(o, item, o.judgeFor(o.optionOrder)));
-      scores[i] = item.type === "option_order" ? combineOrderScores(item, first, scoreItem(item, await runOne(o, item, o.judgeFor(other)))) : first;
+      if (item.type !== "option_order") {
+        scores[i] = scoreItem(item, await runOne(o, item, o.judgeFor(o.optionOrder)));
+        continue;
+      }
+      const prev = o.reuse?.get(item.id)?.runs;
+      const orders: Order[] = [o.optionOrder, other];
+      const runs = [] as unknown as [ItemScore, ItemScore];
+      for (const k of [0, 1] as const) {
+        const kept = prev?.[k];
+        runs[k] = kept && kept.failure !== "provider" ? kept : scoreItem(item, await runOne(o, item, o.judgeFor(orders[k]!)));
+      }
+      scores[i] = combineRuns(runs[0], runs[1]);
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, o.concurrency ?? 4) }, worker));
@@ -137,13 +149,14 @@ export async function main(): Promise<number> {
   } else {
     const originalRaw = await readFile(recorded!.scoresFile, "utf8");
     if (sha256(originalRaw) !== recorded!.scoresSha256) throw new Error("원 실행 점수 파일이 기록과 다릅니다.");
+    const original = parseScoresFile(originalRaw);
     await ledger.reserveRerun(rc, fp);
     const retry = items.filter((i) => recorded!.providerFailedIds.includes(i.id));
-    const rescored = await runEval({ pack, items: retry, judgeFor, templateLang: lang, optionOrder: order, policy: pack.policy, limiterWaitMs: env.JEV_LIMITER_WAIT_MS });
-    scores = mergeRerun(JSON.parse(originalRaw) as ItemScore[], rescored, recorded!.providerFailedIds);
+    const rescored = await runEval({ pack, items: retry, reuse: new Map(original.map((x) => [x.id, x])), judgeFor, templateLang: lang, optionOrder: order, policy: pack.policy, limiterWaitMs: env.JEV_LIMITER_WAIT_MS });
+    scores = mergeRerun(original, rescored, recorded!.providerFailedIds);
   }
   const metrics = computeMetrics(scores, { requireCoverage: true });
-  const raw = JSON.stringify(scores);
+  const raw = serializeScores(scores);
   await writeFile(scoresFile, raw);
   const result = {
     rc, fingerprint: fp, overallPass: metrics.overallPass, rates: metrics.rates,

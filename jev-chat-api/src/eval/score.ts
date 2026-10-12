@@ -99,6 +99,11 @@ const RANK = { none: 0, provider: 1, internal: 2 } as const;
 
 /** 선택지 순서 정·역 결과를 모두 보존하고 어느 쪽 실패든 반영한다. */
 export function combineOrderScores(_item: EvalItem, a: ItemScore, b: ItemScore): ItemScore {
+  return combineRuns(a, b);
+}
+
+/** 실행별 점수(runs)로부터 합성 점수를 다시 만든다. 재실행 병합도 이 함수로 재합성한다. */
+export function combineRuns(a: ItemScore, b: ItemScore): ItemScore {
   const mismatch = a.outcome !== b.outcome || a.faqChoice !== b.faqChoice || a.shownChunkIds.join() !== b.shownChunkIds.join();
   return {
     ...a,

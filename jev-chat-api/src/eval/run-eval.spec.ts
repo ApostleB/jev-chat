@@ -37,4 +37,16 @@ describe("runEval (FakeJudge)", () => {
     await runEval({ pack, items: [items[0]!], judgeFor: (o) => (o === "normal" ? normal : reversed), templateLang: "en", optionOrder: "reversed", policy: pack.policy, limiterWaitMs: 3000 });
     expect([normal.turnCalls.length, reversed.turnCalls.length]).toEqual([0, 1]);
   });
+  it("[H1] reuse: provider 실패였던 방향만 다시 실행하고 다른 방향은 원 점수를 재사용", async () => {
+    const pack = await loadDomainPack(MINI);
+    const mk = () => new FakeJudge(async () => faqOk(), async (r) => okRelevance(r.chunk.id, 0.1));
+    const [first] = await runEval({ pack, items: [items[1]!], judgeFor: () => mk(), templateLang: "en", optionOrder: "normal", policy: pack.policy, limiterWaitMs: 3000 });
+    const prev = { ...first!, runs: [first!.runs![0], { ...first!.runs![1], failure: "provider" as const }] as [typeof first & object, typeof first & object] };
+    const normal = mk();
+    const reversed = mk();
+    const [again] = await runEval({ pack, items: [items[1]!], reuse: new Map([[prev.id, prev]]), judgeFor: (o) => (o === "normal" ? normal : reversed), templateLang: "en", optionOrder: "normal", policy: pack.policy, limiterWaitMs: 3000 });
+    expect([normal.turnCalls.length, reversed.turnCalls.length]).toEqual([0, 1]);
+    expect(again!.failure).toBe("none");
+    expect(again!.runs![0]).toBe(prev.runs[0]);
+  });
 });
