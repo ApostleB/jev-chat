@@ -15,6 +15,7 @@ import type { Namespace, Socket } from "socket.io";
 import type { AuthedPrincipal, AuthProvider } from "../auth/auth.types";
 import { AUTH_PROVIDER } from "../auth/auth.types";
 import { hasRole } from "../auth/access";
+import { armExpiry } from "../auth/expiry";
 import { ChatService, type ReplyPort } from "./chat.service";
 import type { ChatEvents } from "./chat-events";
 import { ERROR_MESSAGES } from "./turn-mapper";
@@ -52,12 +53,14 @@ export class ChatGateway implements OnGatewayInit {
         const principal = typeof token === "string" ? await this.auth.verify(token) : null;
         if (!principal) return next(connectError("UNAUTHORIZED"));
         (socket.data as SocketData).principal = principal;
-        if (principal.expiresAt) {
-          const ms = principal.expiresAt - Date.now();
-          if (ms <= 0) return next(connectError("UNAUTHORIZED"));
-          const timer = setTimeout(() => socket.disconnect(true), ms);
-          timer.unref();
-          socket.once("disconnect", () => clearTimeout(timer));
+        const expiry = armExpiry(principal.expiresAt, () => socket.disconnect(true));
+        if (!expiry.ok) return next(connectError("UNAUTHORIZED")); // 숫자가 아니거나 유한하지 않음 / 이미 만료
+        // 인증(await) 도중 연결이 끊겼으면 타이머를 남기지 않는다. 이후 종료에서도 해제한다.
+        if (socket.disconnected || socket.conn?.readyState === "closed" || socket.conn?.readyState === "closing") {
+          expiry.cancel(); // socket.io는 닫힌 연결의 next()를 무시한다
+        } else {
+          socket.once("disconnect", expiry.cancel);
+          socket.conn?.once("close", expiry.cancel);
         }
         next();
       })().catch((e: unknown) => {
