@@ -273,7 +273,7 @@ message_reviews   id · trace_id · verdict(correct|wrong|partial) · expected_i
 - `AuthProvider.verify(token) → { userId, roles, expiresAt? }`. 실패 `UNAUTHORIZED`, 버전 불일치 `PROTOCOL_UNSUPPORTED`(지원 버전 목록 포함). `expiresAt`이 지나면 서버가 연결 종료.
 - **MVP 구현체 `DevAuthProvider`**: `AUTH_MODE=dev`일 때만 활성. env `DEV_ACCESS_TOKEN`과 일치하면 **고정 userId `dev-admin`, roles=[user, debug, admin]인 공유 테스트 관리자 계정**. `NODE_ENV=production`이고 `AUTH_MODE=dev`이면 **서버 시작을 거부**한다.
 - 역할: **user** = 본인 세션만, **debug** = 접근 가능한 세션의 trace 열람, **admin** = 전체 세션 열람·검수·지식 재로드.
-- 세션 접근 시 `session.user_id === principal.userId` 또는 admin 확인. 소켓은 **권한 확인 → room 참여 → 이력 조회** 순서(조회 직후 완료 이벤트 유실 방지). trace는 room 안에서 **수신 소켓의 debug 권한**으로 걸러 개별 발송(broadcast 금지).
+- 세션 접근 시 `session.user_id === principal.userId` 또는 admin 확인. **읽기와 쓰기를 구분한다**(2026-10-12): 열람(`session:start`, REST 조회, trace)은 본인 또는 admin, **발송(`chat:send`)은 본인 세션만** — admin도 타인 세션에 메시지를 보낼 수 없다(`FORBIDDEN`). 소켓은 **권한 확인 → room 참여 → 이력 조회** 순서(조회 직후 완료 이벤트 유실 방지). trace는 room 안에서 **수신 소켓의 debug 권한**으로 걸러 개별 발송(broadcast 금지).
 - 일반 사용자 소유권·역할 검증은 테스트에서 **서로 다른 principal을 주는 `FakeAuthProvider`**로 한다(공유 dev 계정으로는 검증되지 않음).
 - CORS/Origin: `CORS_ORIGINS` 허용 목록. CORS는 polling에만 적용되므로 **WebSocket handshake에서도 Origin을 검사**한다(`allowRequest`). Origin 헤더가 없는 비브라우저 클라이언트는 토큰 인증만으로 허용. REST body는 8KB 제한. 운영은 HTTPS/WSS.
 
@@ -305,8 +305,8 @@ type ErrorCode = "UNAUTHORIZED" | "FORBIDDEN" | "PROTOCOL_UNSUPPORTED" | "INVALI
 
 ### REST (jev-front용, 모두 같은 AuthProvider + 역할 가드)
 ```
-GET  /api/sessions?cursor=&route=&intent=     user: 본인 / admin: 전체
-GET  /api/sessions/:id/turns?beforeTurnSeq=    소유권 확인
+GET  /api/sessions?cursor=&route=&intent=     user: 본인 / admin: 전체 — 정렬 (created_at desc, id desc), 커서도 같은 키(값이 바뀌는 last_active_at은 표시만)
+GET  /api/sessions/:id/turns?beforeTurnSeq=    소유권 확인 — 응답 TurnPage { turns(turn_seq 오름차순, 최대 50), hasMore, nextBeforeTurnSeq? } (session:start ack와 같은 규칙, protocol에 정의)
 GET  /api/traces/:id                           debug (+세션 접근 권한)
 GET  /api/reviews/queue?cursor=                admin — route ∈ {reference, clarify, fallback, error} 또는 faq_prob < 0.9
 POST /api/traces/:id/review                    admin, reviewer는 principal에서

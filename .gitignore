@@ -28,3 +28,6 @@ infra/data/
 
 # Prisma 생성 클라이언트
 jev-chat-api/src/generated/
+
+# 검수 내보내기 산출물 — 질문 원문·메모 포함(공개 저장소 커밋 금지)
+eval-from-reviews*.jsonl
