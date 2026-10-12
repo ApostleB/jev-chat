@@ -3175,7 +3175,7 @@ describe.runIf(url)("앱 부팅 (통합)", () => {
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` 그리고 `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test`
 Expected: 스냅샷 9건 PASS, 턴 저장소 통합 11건 PASS, 앱 부팅 1건 PASS(URL 없으면 통합은 skip), core 회귀 없음
 
-- [ ] **Step 7: 부팅 스모크 테스트 (사람이 준비한 `.env`와 DB 필요)**
+- [x] **Step 7: 부팅 스모크 테스트 (사람이 준비한 `.env`와 DB 필요)**
 
 Run: `pnpm --filter jev-chat-api knowledge:import src/adapters/knowledge/__fixtures__/mini-pack` → `pnpm --filter jev-chat-api start:dev` (별도 터미널) → `curl -s localhost:3000/api/health`
 Expected: import 시 "적재 완료" 출력, health는 `{"status":"ok"}`, 서버 로그에 env 값·키가 출력되지 않음. 확인 후 서버 종료.
