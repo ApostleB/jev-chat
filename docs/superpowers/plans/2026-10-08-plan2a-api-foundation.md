@@ -1748,7 +1748,7 @@ describe.runIf(prisma)("Prisma 스키마 (통합)", () => {
 });
 ```
 
-- [ ] **Step 6: 마이그레이션 생성 (사람이 준비한 DB 필요)**
+- [x] **Step 6: 마이그레이션 생성 (사람이 준비한 DB 필요)**
 
 `jev-chat-api/.env`가 없으면 사용자에게 `.env.example`을 복사해 DB_* 값을 채워 달라고 요청하고 멈춘다(에이전트는 `.env`를 읽거나 쓰지 않는다).
 Run: `pnpm --filter jev-chat-api db:migrate --name init`
@@ -1759,7 +1759,7 @@ Expected: `prisma/migrations/<timestamp>_init/migration.sql` 생성, 개발 DB�
 Run: `TEST_DATABASE_URL=<사용자가 알려준 테스트 DB URL> pnpm --filter jev-chat-api test -- persistence/prisma`
 Expected: PASS 3 (TEST_DATABASE_URL 없이 실행하면 통합 2건은 skip, URL 단위 테스트 1건만 PASS)
 
-- [ ] **Step 8: 커밋**
+- [x] **Step 8: 커밋**
 
 ```bash
 git add infra jev-chat-api/prisma.config.ts jev-chat-api/prisma jev-chat-api/src/adapters/persistence jev-chat-api/test pnpm-lock.yaml
