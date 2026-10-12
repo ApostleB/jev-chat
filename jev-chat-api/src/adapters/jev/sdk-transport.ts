@@ -74,6 +74,22 @@ function checkShape(res: unknown): { model: string; answers: unknown; usage: { i
   return { model: r.model, answers: r.answers, usage: { input_tokens: r.usage.input_tokens, output_tokens: r.usage.output_tokens } };
 }
 
+/**
+ * 응답 본문을 fetch 안에서 먼저 끝까지 읽어 버퍼 Response로 돌려준다.
+ * SDK는 본문을 읽는 중 abort되면 response.clone()으로 갈라진 원본 스트림 쪽 AbortError를 아무도 관찰하지 못해
+ * unhandledRejection(→ 프로세스 종료)이 생긴다. 본문 읽기를 우리가 await하면 거부가 항상 관찰된다.
+ */
+export function withBufferedBody(base: typeof fetch): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const res = await base(input, init);
+    const body = await res.arrayBuffer(); // abort 시 여기서 reject → SDK가 await하는 경로로 전달
+    const headers = new Headers(res.headers);
+    headers.delete("content-length");
+    headers.delete("content-encoding"); // fetch가 이미 해제한 본문
+    return new Response(body, { status: res.status, statusText: res.statusText, headers });
+  }) as typeof fetch;
+}
+
 export class SdkJevTransport implements JevTransport {
   private readonly client: TypeSafeClient;
 
@@ -81,7 +97,7 @@ export class SdkJevTransport implements JevTransport {
     this.client = new TypeSafeClient({
       apiKey: config.apiKey,
       ...(config.baseURL ? { baseURL: config.baseURL } : {}),
-      ...(config.fetch ? { fetch: config.fetch } : {}),
+      fetch: withBufferedBody(config.fetch ?? globalThis.fetch),
       ...(config.logger ? { logger: config.logger } : {}),
       logLevel: "warn",
       retry: { maxRetries: 0 },
