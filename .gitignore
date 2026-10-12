@@ -10,8 +10,9 @@ build/
 coverage/
 *.tsbuildinfo
 
-# 로그
-logs/
+# 로그 (런타임 로그 디렉터리만 — 소스의 features/logs 같은 폴더는 무시하지 않음)
+/logs/
+jev-chat-api/logs/
 *.log
 npm-debug.log*
 pnpm-debug.log*
@@ -34,4 +35,3 @@ eval-from-reviews*.jsonl
 
 # 평가 리포트(holdout 점수 포함, 로컬 전용)
 jev-chat-api/eval-reports/
-!jev-front/src/features/logs/
