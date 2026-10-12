@@ -1023,7 +1023,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `decideHoldout(status, mode, existingFpRc: string | null, recorded?: HoldoutResult, current?: Fingerprint)` → 허용/거부(사유)
   - `mergeRerun(original: ItemScore[], rerun: ItemScore[], allowedIds: string[]): ItemScore[]` [E5]
   - `runEval(opts: { pack; items; judgeFor: (order: "normal" | "reversed") => Judge; templateLang; optionOrder; policy: Policy; concurrency?; limiterWaitMs }): Promise<ItemScore[]>` — option_order 항목은 `judgeFor("normal")`·`judgeFor("reversed")` 두 번 실행 후 `combineOrderScores` [E3]
-  - CLI: `pnpm --filter jev-chat-api eval -- --set tune [--lang en|ko] [--order normal|reversed] [--policy override.yaml] [--limit N]` / `--set holdout --rc <name> [--rerun-provider-failures]`
+  - CLI: `pnpm --filter jev-chat-api eval --set tune [--lang en|ko] [--order normal|reversed] [--policy override.yaml] [--limit N]` / `--set holdout --rc <name> [--rerun-provider-failures]`
 
 규칙:
 - **tune**: `--limit`은 양의 정수, `--policy`는 camelCase 덮어쓰기 YAML(`applyPolicyOverride`로 검증). 리포트에 항목별 실패 포함.
@@ -1628,7 +1628,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 7: 첫 평가 실행 (사람 + 오케스트레이터, 실제 Jev 키 필요)
 
-- [ ] tune 기준선: `pnpm --filter jev-chat-api eval -- --set tune --lang en`, `--lang ko` 각각 1회, `--order reversed` 1회 → 리포트 3개
+- [ ] tune 기준선: `pnpm --filter jev-chat-api eval --set tune --lang en`, `--lang ko` 각각 1회, `--order reversed` 1회 → 리포트 3개
 - [ ] 오케스트레이터가 리포트를 비교해 **템플릿 언어**와 **임계값 조정안**을 제안하고, 사용자가 결정한다. 조정은 `--policy`로 tune에서만 재실행해 확인 후 `policy.yaml`에 반영(팩 버전 올림).
 - [ ] 결정이 끝나면 변경을 모두 커밋(작업 트리 깨끗)한 뒤 RC 이름을 정해 `--set holdout --rc <name>` 1회 실행 → `eval/holdout-ledger/` 커밋. 리포트에는 지표만 있고, 항목별 결과(`eval-reports/holdout-<rc>-scores.json`)는 오케스트레이터만 확인한다.
 - [ ] 외부 공급자 장애 항목이 있으면 `--rerun-provider-failures`로 1회만 재실행(병합 후 전체 지표 재계산).
