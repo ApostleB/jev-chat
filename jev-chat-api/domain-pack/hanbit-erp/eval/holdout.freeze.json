@@ -1,0 +1,18 @@
+{
+  "sha256": "7aa04c0109bd5da725bb3815afd826b333492848acc60583bbb1ca5b501dbd99",
+  "count": 61,
+  "typeCounts": {
+    "normal": 14,
+    "negation": 4,
+    "confusable": 9,
+    "out_of_scope": 6,
+    "smalltalk": 3,
+    "followup": 8,
+    "ambiguous": 5,
+    "injection": 5,
+    "number_date": 4,
+    "option_order": 3
+  },
+  "authoredBy": "codex",
+  "frozenAt": "2026-10-12T10:41:49Z"
+}
