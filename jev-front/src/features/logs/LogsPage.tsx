@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, errorText } from "@/lib/api";
+import { INTENT_IDS } from "@/lib/intents";
 import { useCursorList } from "@/lib/use-cursor-list";
 import { TraceSheet } from "./TraceSheet";
 
@@ -15,9 +16,10 @@ const ALL = "all";
 /** 대화 로그는 읽기 전용이다(전송 UI 없음). [P3] 세션 목록은 서버 정렬 그대로이며 '마지막 활동'은 표시만 한다. [P5] */
 export function LogsPage({ enabled, authEpoch }: { enabled: boolean; authEpoch: number }) {
   const [route, setRoute] = useState<string>(ALL);
+  const [intent, setIntent] = useState<string>(ALL);
   const [session, setSession] = useState<SessionSummary | null>(null);
   const [traceId, setTraceId] = useState<string | null>(null);
-  const sessions = useCursorList({ key: "sessions", authEpoch, path: "/api/sessions", params: route === ALL ? {} : { route }, item: SessionSummarySchema, enabled });
+  const sessions = useCursorList({ key: "sessions", authEpoch, path: "/api/sessions", params: { ...(route === ALL ? {} : { route }), ...(intent === ALL ? {} : { intent }) }, item: SessionSummarySchema, enabled });
   const sid = session?.id ?? null;
   const turns = useInfiniteQuery({
     queryKey: ["turns", authEpoch, sid],
@@ -38,6 +40,13 @@ export function LogsPage({ enabled, authEpoch }: { enabled: boolean; authEpoch: 
             <SelectContent>
               <SelectItem value={ALL}>전체 route</SelectItem>
               {ROUTES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={intent} onValueChange={(v) => v && setIntent(v)} items={{ [ALL]: "전체 intent", ...Object.fromEntries(INTENT_IDS.map((i) => [i, i])) }}>
+            <SelectTrigger aria-label="intent 필터"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>전체 intent</SelectItem>
+              {INTENT_IDS.map((i) => <SelectItem key={i} value={i}>{i}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>

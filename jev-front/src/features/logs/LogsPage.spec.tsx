@@ -58,6 +58,20 @@ describe("LogsPage", () => {
     await vi.waitFor(() => expect(calls.some((c) => c.path === "/api/sessions?route=blocked")).toBe(true));
   });
 
+  it("intent 필터를 route와 함께 서버 쿼리로 전달하고, '전체'로 되돌리면 파라미터를 뺀다", async () => {
+    const { calls } = stubRest((u) => (u.pathname === "/api/sessions" ? { status: 200, body: { items: [], nextCursor: null } } : undefined));
+    renderWithQuery(<LogsPage enabled authEpoch={0} />);
+    await screen.findByText("세션이 없습니다.");
+    await userEvent.click(screen.getByRole("combobox", { name: "route 필터" }));
+    await userEvent.click(await screen.findByRole("option", { name: "faq" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "intent 필터" }));
+    await userEvent.click(await screen.findByRole("option", { name: "how_to" }));
+    await vi.waitFor(() => expect(calls.some((c) => c.path === "/api/sessions?route=faq&intent=how_to")).toBe(true));
+    await userEvent.click(screen.getByRole("combobox", { name: "intent 필터" }));
+    await userEvent.click(await screen.findByRole("option", { name: "전체 intent" }));
+    await vi.waitFor(() => expect(calls.filter((c) => c.path === "/api/sessions?route=faq").length).toBeGreaterThan(0));
+  });
+
   it("[P1] 턴 목록은 TurnPage로 검증하고, hasMore면 '이전 턴 더 보기'로 beforeTurnSeq 요청 후 앞에 붙인다", async () => {
     const { calls } = stubRest((u) => {
       if (u.pathname === "/api/sessions") return { status: 200, body: { items: [session(SID, "2026-10-12T00:00:00Z", "2026-10-12T00:01:00Z")], nextCursor: null } };
