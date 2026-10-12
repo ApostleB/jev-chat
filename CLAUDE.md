@@ -2,10 +2,11 @@
 
 사내 ERP 규정·사용방법 Q&A 챗봇. 모든 답변은 한국어.
 
-## 역할 (Orca 터미널)
-- 상단: 오케스트레이터 / 설계 (Claude Opus) — `docs/`의 설계·계약 문서 소유
-- 하단 좌측: 구현 (Claude Opus)
-- 하단 우측: 검토 (Codex) — 규칙은 `AGENTS.md`
+## 역할 (2026-10-12 변경)
+- 오케스트레이터 (상단, Claude Opus): 전체 흐름 관리 + 설계·설계 검토 — `docs/`의 설계·계약 문서 소유
+- 기획: Claude Fable 서브에이전트 (구현 계획 작성)
+- 구현: Claude Sonnet 서브에이전트 (오케스트레이터가 이 세션에서 직접 띄움, 커밋만·push 금지)
+- 코드 검토: Codex (Orca 하단 우측) — 규칙은 `AGENTS.md`
 
 ## 구조
 - `jev-chat-api/` NestJS (Socket.IO 위주). `src/core`는 NestJS·Prisma·Socket.IO·`process.env` import 금지

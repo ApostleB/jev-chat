@@ -1,6 +1,6 @@
 # AGENTS.md — jev-chat 검토(Codex) 규칙
 
-이 저장소에서 Codex의 역할은 **검토자**다. 설계는 오케스트레이터(Claude Opus, 상단 터미널), 구현은 구현 에이전트(Claude Opus, 하단 좌측)가 맡는다.
+이 저장소에서 Codex의 역할은 **검토자**다. 오케스트레이터(Claude Opus, 상단 터미널)가 설계·설계 검토를 맡고, 기획은 Claude Fable, 구현은 오케스트레이터가 띄우는 Claude Sonnet 서브에이전트가 맡는다.
 모든 답변과 리뷰 문서는 **한국어**로 작성한다.
 
 ## 프로젝트 개요
