@@ -35,6 +35,9 @@ interface Deps {
   log?: (where: string, err: unknown) => void;
 }
 
+/** 권한 확인 결과. 허용이면 DB의 canonical session id를 돌려준다(이후 모든 키·room·이벤트는 이 값만 쓴다). */
+export type AuthzResult = { ok: true; sessionId: string } | { ok: false; ack: Ack<never> };
+
 /** [B4] 큐에 들어간 턴의 상태. 만료와 실행 중 하나만 일어난다. */
 interface QueuedTurn {
   started: boolean;
@@ -61,16 +64,19 @@ export class ChatService {
     return this.inflight.size;
   }
 
-  /** 세션 접근 권한(read: 본인·admin, write: 본인만). 허용이면 null. [B1] 조회 실패는 INTERNAL */
-  async authorize(p: AuthedPrincipal, sessionId: string, mode: "read" | "write"): Promise<Ack<never> | null> {
+  /**
+   * 세션 접근 권한(read: 본인·admin, write: 본인만). [B1] 조회 실패는 INTERNAL.
+   * DB는 대소문자를 구분하지 않고 같은 세션을 찾으므로, 요청 표기가 아니라 DB의 canonical id를 돌려준다.
+   */
+  async authorize(p: AuthedPrincipal, sessionId: string, mode: "read" | "write"): Promise<AuthzResult> {
     try {
       const s = await this.deps.store.findSession(sessionId);
-      if (!s) return fail("NOT_FOUND");
-      if (!(mode === "write" ? canWriteSession : canReadSession)(p, s.userId)) return fail("FORBIDDEN");
-      return null;
+      if (!s) return { ok: false, ack: fail("NOT_FOUND") };
+      if (!(mode === "write" ? canWriteSession : canReadSession)(p, s.userId)) return { ok: false, ack: fail("FORBIDDEN") };
+      return { ok: true, sessionId: s.id };
     } catch (e) {
       this.log("authorize", e);
-      return fail("INTERNAL");
+      return { ok: false, ack: fail("INTERNAL") };
     }
   }
 
@@ -88,8 +94,9 @@ export class ChatService {
         if (!limited.ok) return fail("RATE_LIMITED", limited.retryAfterMs);
         sessionId = (await this.deps.store.createSession(p.userId, channel)).id;
       } else {
-        const denied = await this.authorize(p, sessionId, "read");
-        if (denied) return denied;
+        const authz = await this.authorize(p, sessionId, "read");
+        if (!authz.ok) return authz.ack;
+        sessionId = authz.sessionId;
       }
       await join(sessionId);
       const page = await this.deps.store.listTurns(sessionId, { limit: HISTORY_LIMIT, ...(req.beforeTurnSeq ? { beforeTurnSeq: req.beforeTurnSeq } : {}) });
@@ -110,12 +117,13 @@ export class ChatService {
   }
 
   async send(p: AuthedPrincipal, req: ChatSendRequest, events: ChatEvents, reply: ReplyPort): Promise<Ack<ChatSendResponse>> {
-    const denied = await this.authorize(p, req.sessionId, "write");
-    if (denied) return denied;
+    const authz = await this.authorize(p, req.sessionId, "write");
+    if (!authz.ok) return authz.ack;
+    const sid = authz.sessionId; // canonical: 잠금·슬롯·enqueue·해제·저장·이벤트 모두 이 값만 쓴다
     try {
-      return await this.deps.queue.withLock(req.sessionId, async () => {
+      return await this.deps.queue.withLock(sid, async () => {
         // ① 멱등 조회 (큐가 가득 차도 동작)
-        const existing = await this.deps.store.findTurnByClientMsgId(req.sessionId, req.clientMsgId);
+        const existing = await this.deps.store.findTurnByClientMsgId(sid, req.clientMsgId);
         if (existing) {
           if (existing.userText !== req.text) return fail<ChatSendResponse>("INVALID_INPUT");
           const limited = this.deps.replayLimiter.take(p.userId);
@@ -127,18 +135,18 @@ export class ChatService {
         const limited = this.deps.sendLimiter.take(p.userId);
         if (!limited.ok) return fail<ChatSendResponse>("RATE_LIMITED", limited.retryAfterMs);
         // ③ 슬롯 예약
-        if (!this.deps.queue.tryReserve(req.sessionId)) return fail<ChatSendResponse>("QUEUE_FULL", QUEUE_FULL_RETRY_MS);
+        if (!this.deps.queue.tryReserve(sid)) return fail<ChatSendResponse>("QUEUE_FULL", QUEUE_FULL_RETRY_MS);
         // ④ DB 원자 예약
         let turn: TurnRow;
         try {
           turn = await this.deps.store.reserveTurn({
-            sessionId: req.sessionId,
+            sessionId: sid,
             clientMsgId: req.clientMsgId,
             userText: req.text,
             ...(req.retryOfTurnSeq ? { retryOfTurnSeq: req.retryOfTurnSeq } : {}),
           });
         } catch (e) {
-          this.deps.queue.release(req.sessionId);
+          this.deps.queue.release(sid);
           this.log("reserveTurn", e);
           return fail<ChatSendResponse>("INTERNAL");
         }
@@ -147,9 +155,9 @@ export class ChatService {
         const state: QueuedTurn = { started: false, expired: false, timer: null };
         state.timer = setTimeout(() => void this.expire(turn, state, events), this.queueMs());
         state.timer.unref?.();
-        events.status({ sessionId: req.sessionId, clientMsgId: turn.clientMsgId, turnSeq: turn.turnSeq, stage: "queued" });
+        events.status({ sessionId: sid, clientMsgId: turn.clientMsgId, turnSeq: turn.turnSeq, stage: "queued" });
         // 같은 프로세스 안에서 ack가 처리 이벤트보다 먼저 나가도록 다음 매크로태스크에서 등록(네트워크 재정렬 대비 클라이언트 upsert[B3]는 유지)
-        this.defer("enqueue", () => this.deps.queue.run(req.sessionId, () => this.process(p, turn, state, events)));
+        this.defer("enqueue", () => this.deps.queue.run(sid, () => this.process(p, turn, state, events)));
         return { ok: true, data: { turnId: turn.id, turnSeq: turn.turnSeq, status: "accepted" } };
       });
     } catch (e) {

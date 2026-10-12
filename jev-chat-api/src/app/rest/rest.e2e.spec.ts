@@ -89,6 +89,16 @@ describe.runIf(enabled)("REST E2E (통합)", () => {
     }
   });
 
+  it("[Q1] 경로 파라미터의 UUID 대문자 표기도 같은 세션·trace로 해석한다", async () => {
+    const turns = await get(`/api/sessions/${aliceSession.toUpperCase()}/turns`, "alice");
+    expect(turns.status).toBe(200);
+    expect(TurnPageSchema.parse(await turns.json()).turns.length).toBeGreaterThan(0);
+    const trace = await get(`/api/traces/${traceId.toUpperCase()}`, "admin");
+    expect(trace.status).toBe(200);
+    expect(TraceDetailSchema.parse(await trace.json()).id).toBe(traceId);
+    expect((await get("/api/sessions/NOT-A-UUID/turns", "alice")).status).toBe(404);
+  });
+
   it("[M-9] DB의 route가 손상됐으면 캐스트하지 않고 500 INTERNAL ApiError", async () => {
     const prisma = createPrismaClient(dbConfigFromUrl(process.env.TEST_DATABASE_URL!));
     try {

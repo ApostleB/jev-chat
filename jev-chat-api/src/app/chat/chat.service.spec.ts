@@ -266,6 +266,46 @@ describe("ChatService", () => {
     }
   });
 
+  it("[Q1] 같은 세션 UUID의 대/소문자 표기를 섞어 보내도 같은 큐·슬롯·이벤트 키로 처리한다(서비스에 정규화 전 원문이 들어와도)", async () => {
+    let running = 0;
+    let maxRunning = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const judge = new FakeJudge(
+      async () => { running++; maxRunning = Math.max(maxRunning, running); await gate; running--; return okTurn({ regulation: 1 }); },
+      async (req) => okRelevance(req.chunk.id, 0.9),
+    );
+    const { store, svc } = setup({ judge, capacity: 5 });
+    const sid = await session(svc);
+    const variants = [sid.toUpperCase(), sid.toLowerCase()];
+    const events = new Recorder();
+    const acks = [];
+    for (let i = 0; i < 6; i++) acks.push(await send(svc, alice, variants[i % 2]!, "법인카드 한도", events));
+    expect(acks.slice(0, 5).every((a) => a.ok)).toBe(true);
+    expect(acks[5]).toMatchObject({ ok: false, error: { code: "QUEUE_FULL" } }); // (a) 6번째
+    expect(new Set(store.turns.map((t) => t.sessionId))).toEqual(new Set([sid])); // 저장도 DB canonical
+    expect(new Set(events.statuses.map((e) => e.sessionId))).toEqual(new Set([sid]));
+    release();
+    await settle(200);
+    expect(maxRunning).toBe(1); // (b) 엔진 동시 실행 최대 1
+    expect(judge.turnCalls[1]?.recentTurns.map((t) => t.role)).toEqual(["user", "assistant"]); // (c) 직전 완료 문맥
+    expect(store.turns.every((t) => t.status === "completed")).toBe(true);
+    expect(svc.inflightCount()).toBe(0);
+  });
+
+  it("[Q1] 같은 clientMsgId를 대/소문자로 다시 보내면 duplicate, startSession도 canonical id를 돌려준다", async () => {
+    const { svc } = setup();
+    const sid = await session(svc);
+    const id = randomUUID();
+    const first = await send(svc, alice, sid.toUpperCase(), "법인카드 한도 얼마예요", new Recorder(), new Recorder(), id);
+    expect(first).toMatchObject({ ok: true, data: { status: "accepted" } });
+    await settle();
+    const again = await send(svc, alice, sid.toLowerCase(), "법인카드 한도 얼마예요", new Recorder(), new Recorder(), id.toUpperCase() as typeof id);
+    expect(again).toMatchObject({ ok: true, data: { status: "duplicate", turnSeq: 1 } });
+    const started = await svc.startSession(alice, { sessionId: sid.toUpperCase() }, "front-test", noJoin);
+    expect(started).toMatchObject({ ok: true, data: { sessionId: sid } });
+  });
+
   it("[M-1] failTurn이 false(다른 경로가 이미 종료)면 저장된 최신 상태대로 통지한다: completed→done, failed→error, processing→무통지", async () => {
     const judge = new FakeJudge(async () => { throw new Error("bug"); }, async () => { throw new Error("bug"); });
     for (const [finalState, expected] of [["completed", "done"], ["failed", "error:RESTARTED"], ["processing", null]] as const) {

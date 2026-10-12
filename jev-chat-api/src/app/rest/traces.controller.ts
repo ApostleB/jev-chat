@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { z } from "zod";
-import { ReviewRequestSchema, type Page, type Review, type ReviewQueueItem, type TraceDetail } from "@jev-chat/protocol";
+import { ReviewRequestSchema, UuidSchema, type Page, type Review, type ReviewQueueItem, type TraceDetail } from "@jev-chat/protocol";
 import { ReviewRepository } from "../../adapters/persistence/review.repository";
 import { TurnRepository } from "../../adapters/persistence/turn.repository";
 import { canReadSession } from "../auth/access";
@@ -25,7 +25,8 @@ export class TracesController {
   @Get("traces/:id")
   @Roles("debug")
   async trace(@CurrentPrincipal() p: AuthedPrincipal, @Param("id") id: string): Promise<TraceDetail> {
-    const t = z.uuid().safeParse(id).success ? await this.turns.findTrace(id) : null;
+    const tid = UuidSchema.safeParse(id);
+    const t = tid.success ? await this.turns.findTrace(tid.data) : null;
     if (!t) throw new ApiException("NOT_FOUND");
     if (!canReadSession(p, t.sessionUserId)) throw new ApiException("FORBIDDEN");
     return { id: t.id, turnId: t.turnId, sessionId: t.sessionId, route: parseRoute(t.route), createdAt: t.createdAt.toISOString(), data: t.data, reviews: await this.reviews.listByTrace(t.id) };
@@ -47,7 +48,8 @@ export class TracesController {
     if (!limited.ok) throw new ApiException("RATE_LIMITED", limited.retryAfterMs);
     const parsed = ReviewRequestSchema.safeParse(body);
     if (!parsed.success) throw new ApiException("INVALID_INPUT");
-    const t = z.uuid().safeParse(id).success ? await this.turns.findTrace(id) : null;
+    const tid = UuidSchema.safeParse(id);
+    const t = tid.success ? await this.turns.findTrace(tid.data) : null;
     if (!t) throw new ApiException("NOT_FOUND");
     return this.reviews.create(t.id, p.userId, parsed.data);
   }

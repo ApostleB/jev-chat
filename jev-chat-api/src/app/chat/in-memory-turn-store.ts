@@ -3,6 +3,9 @@ import type { CompletedTurn, EngineResult, TraceRecord } from "../../core";
 import type { TurnRow } from "../../adapters/persistence/turn.repository";
 import type { TurnStore } from "./turn-store";
 
+/** 대소문자 무시 비교 키. 실제 DB(utf8mb4_unicode_ci)가 UUID를 이렇게 비교하므로 표기 차이를 숨기지 않게 같은 규칙을 쓴다. */
+const ci = (v: string) => v.toLowerCase();
+
 /** 단위 테스트 전용 TurnStore. 실제 동작은 TurnRepository 통합 테스트로 검증한다. */
 export class InMemoryTurnStore implements TurnStore {
   readonly sessions = new Map<string, { id: string; userId: string; next: number }>();
@@ -19,20 +22,20 @@ export class InMemoryTurnStore implements TurnStore {
 
   async createSession(userId: string, _channel: string) {
     const id = randomUUID();
-    this.sessions.set(id, { id, userId, next: 1 });
+    this.sessions.set(ci(id), { id, userId, next: 1 });
     return { id };
   }
   async findSession(id: string) {
     this.calls.push("findSession");
     if (this.throwOn.has("findSession")) throw new Error("db down");
-    const s = this.sessions.get(id);
+    const s = this.sessions.get(ci(id));
     return s ? { id: s.id, userId: s.userId } : null;
   }
   async findTurnByClientMsgId(sessionId: string, clientMsgId: string) {
-    return this.turns.find((t) => t.sessionId === sessionId && t.clientMsgId === clientMsgId) ?? null;
+    return this.turns.find((t) => ci(t.sessionId) === ci(sessionId) && ci(t.clientMsgId) === ci(clientMsgId)) ?? null;
   }
   async reserveTurn(input: { sessionId: string; clientMsgId: string; userText: string; retryOfTurnSeq?: number }) {
-    const s = this.sessions.get(input.sessionId)!;
+    const s = this.sessions.get(ci(input.sessionId))!; // FK는 대소문자 무시로 해석되지만 컬럼에는 넘긴 문자열이 그대로 저장된다
     const row: TurnRow = {
       id: randomUUID(), sessionId: input.sessionId, turnSeq: s.next++, clientMsgId: input.clientMsgId, userText: input.userText,
       status: "processing", errorCode: null, errorRetryable: null, assistantText: null, route: null, sources: null, traceId: null, createdAt: new Date(),
@@ -63,12 +66,12 @@ export class InMemoryTurnStore implements TurnStore {
   }
   async listTurns(sessionId: string, opts: { beforeTurnSeq?: number; limit: number }) {
     this.calls.push("listTurns");
-    const all = this.turns.filter((t) => t.sessionId === sessionId && (!opts.beforeTurnSeq || t.turnSeq < opts.beforeTurnSeq)).sort((a, b) => a.turnSeq - b.turnSeq);
+    const all = this.turns.filter((t) => ci(t.sessionId) === ci(sessionId) && (!opts.beforeTurnSeq || t.turnSeq < opts.beforeTurnSeq)).sort((a, b) => a.turnSeq - b.turnSeq);
     return { turns: all.slice(-opts.limit), hasMore: all.length > opts.limit };
   }
   async loadCompletedTurns(sessionId: string, beforeTurnSeq: number, limit: number): Promise<CompletedTurn[]> {
     return this.turns
-      .filter((t) => t.sessionId === sessionId && t.status === "completed" && t.turnSeq < beforeTurnSeq)
+      .filter((t) => ci(t.sessionId) === ci(sessionId) && t.status === "completed" && t.turnSeq < beforeTurnSeq)
       .sort((a, b) => a.turnSeq - b.turnSeq)
       .slice(-limit)
       .map((t) => ({ turnSeq: t.turnSeq, userText: t.userText, assistantText: t.assistantText ?? "", sources: (t.sources ?? []).map((s) => ({ title: s.title, section: s.section })) }));

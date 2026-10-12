@@ -128,10 +128,10 @@ export class ChatGateway implements OnGatewayInit {
       const p = this.principal(socket);
       // 권한을 먼저 확인한 뒤 room에 참여한다 → 다른 사용자의 세션 이벤트를 받을 수 없다.
       // (처리 결과 이벤트가 ack보다 먼저 올 수 있으므로 send 호출 전에 참여한다)
-      const denied = await this.chat.authorize(p, parsed.data.sessionId, "write");
-      if (denied) return denied;
-      await socket.join(room(parsed.data.sessionId));
-      return await this.chat.send(p, parsed.data, this.roomEvents(), this.replyTo(socket));
+      const authz = await this.chat.authorize(p, parsed.data.sessionId, "write");
+      if (!authz.ok) return authz.ack;
+      await socket.join(room(authz.sessionId)); // DB의 canonical id
+      return await this.chat.send(p, { ...parsed.data, sessionId: authz.sessionId }, this.roomEvents(), this.replyTo(socket));
     } catch (e) {
       this.log.error(`chat:send 오류: ${(e as Error)?.name ?? "unknown"}`);
       return failAck("INTERNAL"); // [B1]
