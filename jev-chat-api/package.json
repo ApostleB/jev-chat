@@ -16,7 +16,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "knowledge:import": "tsx src/scripts/knowledge-import.ts"
+    "knowledge:import": "tsx src/scripts/knowledge-import.ts",
+    "eval:export-reviews": "tsx src/scripts/export-reviews.ts"
   },
   "dependencies": {
     "@jev-chat/protocol": "workspace:*",

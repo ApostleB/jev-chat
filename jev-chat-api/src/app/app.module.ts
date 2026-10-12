@@ -7,6 +7,7 @@ import { ENV, type Env } from "./config/env.schema";
 import { HealthController } from "./health.controller";
 import { JevModule } from "./jev.module";
 import { SnapshotService } from "./knowledge/snapshot.service";
+import { RetentionService } from "./ops/retention.service";
 import { PersistenceModule } from "./persistence.module";
 import { RestModule } from "./rest.module";
 
@@ -30,6 +31,7 @@ export class AppModule implements OnApplicationBootstrap {
           inject: [KnowledgeRepository],
           useFactory: (repo: KnowledgeRepository) => new SnapshotService(repo, { limiterWaitMs: env.JEV_LIMITER_WAIT_MS }),
         },
+        RetentionService,
       ],
       exports: [ENV, SnapshotService],
     };

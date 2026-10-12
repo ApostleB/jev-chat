@@ -2499,7 +2499,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `TurnRepository.deleteOlderThan(cutoff: Date): Promise<{ turns: number; sessions: number }>`([B11] 턴 createdAt 기준으로 processing이 아닌 턴 삭제 → cascade로 trace·검수 삭제, 그 뒤 턴이 없고 lastActiveAt이 cutoff 이전인 세션 삭제), `RetentionService`(부팅 1분 후 + 24시간마다, `unref` 타이머), CLI `pnpm --filter jev-chat-api eval:export-reviews [출력경로]`(검수 결과 → 6장 평가 항목 스키마 jsonl)
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/adapters/persistence/retention.spec.ts`:
 ```ts
@@ -2555,12 +2555,12 @@ describe.runIf(prisma)("보관 기간 정리 (통합)", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test -- retention`
 Expected: FAIL — `deleteOlderThan` 없음 (2건)
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 `turn.repository.ts`에 추가:
 ```ts
@@ -2727,12 +2727,12 @@ module.exports = {
 ```
 ※ 현재 `AUTH_MODE`는 `dev`뿐이라 `--env production`으로는 시작이 거부된다(설계 8장 출시 조건 ③). 사내 테스트 서버는 `pm2 start ecosystem.config.js`(development)로 띄운다.
 
-- [ ] **Step 4: 실행 → 통과 + 빌드 확인**
+- [x] **Step 4: 실행 → 통과 + 빌드 확인**
 
 Run: `TEST_DATABASE_URL=… pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api build && node -e "require('./ecosystem.config.js')"`
 Expected: 전부 PASS, `jev-chat-api/dist/app/main.js` 생성, ecosystem 파일 문법 오류 없음
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add ecosystem.config.js jev-chat-api

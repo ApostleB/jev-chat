@@ -256,4 +256,11 @@ export class TurnRepository implements ContextReader {
       nextCursor: rows.length > page.limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,
     };
   }
+
+  /** [B11] 턴 단위 보관: cutoff 이전에 만들어진 종료된 턴 삭제(trace·검수는 FK cascade) → 빈 오래된 세션 삭제. 처리 중 턴은 지우지 않는다. */
+  async deleteOlderThan(cutoff: Date): Promise<{ turns: number; sessions: number }> {
+    const turns = await this.prisma.chatTurn.deleteMany({ where: { createdAt: { lt: cutoff }, status: { not: "processing" } } });
+    const sessions = await this.prisma.chatSession.deleteMany({ where: { lastActiveAt: { lt: cutoff }, turns: { none: {} } } });
+    return { turns: turns.count, sessions: sessions.count };
+  }
 }
