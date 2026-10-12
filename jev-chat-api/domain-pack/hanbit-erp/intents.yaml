@@ -1,0 +1,12 @@
+- id: regulation
+  description: "Asks about company rules/policies enforced through ERP (approval lines, closing deadlines, expense limits, password policy). Not how to click something."
+- id: how_to
+  description: "Asks how to perform a task or find a screen/menu/function in the ERP."
+- id: error
+  description: "Reports an ERP error message, malfunction, or unexpected behavior."
+- id: account_access
+  description: "Requests or has a problem with their own account, login, password reset, or permission. Questions about what the password/permission policy is are regulation."
+- id: smalltalk
+  description: "Greetings, thanks, or chit-chat with no ERP request."
+- id: out_of_scope
+  description: "A work or personal question unrelated to the ERP."

@@ -1531,7 +1531,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - ambiguous·out_of_scope는 `allowed_outcomes`를 HOLD/BLOCK 중심으로.
 - **holdout은 작성하지 않는다**(Task 6, 검토 터미널).
 
-- [ ] **Step 1: 팩 계약 테스트 작성**
+- [x] **Step 1: 팩 계약 테스트 작성**
 
 `jev-chat-api/src/eval/hanbit-pack.spec.ts`:
 ```ts
@@ -1597,13 +1597,13 @@ describe("HB-ERP domain-pack 계약", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인** — Run: `pnpm --filter jev-chat-api test -- hanbit-pack` → FAIL (팩 없음)
+- [x] **Step 2: 실행 → 실패 확인** — Run: `pnpm --filter jev-chat-api test -- hanbit-pack` → FAIL (팩 없음)
 
-- [ ] **Step 3: 팩과 tune 작성** — 위 작성 규칙대로 파일을 만든다. 모듈 단위로 나눠 작성하고 매번 `pnpm --filter jev-chat-api test -- hanbit-pack`으로 검증한다.
+- [x] **Step 3: 팩과 tune 작성** — 위 작성 규칙대로 파일을 만든다. 모듈 단위로 나눠 작성하고 매번 `pnpm --filter jev-chat-api test -- hanbit-pack`으로 검증한다.
 
-- [ ] **Step 4: 오프라인 회귀 확인** — `pnpm --filter jev-chat-api test` 전체 PASS (실제 Jev 호출 없음)
+- [x] **Step 4: 오프라인 회귀 확인** — `pnpm --filter jev-chat-api test` 전체 PASS (실제 Jev 호출 없음)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 ```bash
 git add jev-chat-api/domain-pack jev-chat-api/src/eval/hanbit-pack.spec.ts
 git commit -m "feat(data): HB-ERP 가상 domain-pack(청크·FAQ)과 tune 평가셋

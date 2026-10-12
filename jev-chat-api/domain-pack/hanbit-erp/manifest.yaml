@@ -1,0 +1,8 @@
+name: hanbit-erp
+version: 0.1.0
+language: ko
+template_version: v1
+helpdesk:
+  phone: 02-0000-0000
+  email: help@hanbit.example
+  url: https://help.hanbit.example

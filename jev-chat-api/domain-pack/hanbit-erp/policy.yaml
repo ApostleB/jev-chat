@@ -1,0 +1,8 @@
+in_scope: { block: 0.4, clarify: 0.6 }
+ambiguous: 0.7
+faq: 0.8
+relevance: { reference: 0.5, answer: 0.8 }
+helpdesk: 0.5
+candidates: { faq: 5, chunk: 8 }
+context: { max_turns: 2, assistant_max_chars: 300 }
+deadlines: { engine_ms: 8000, queue_ms: 10000, save_ms: 3000 }
