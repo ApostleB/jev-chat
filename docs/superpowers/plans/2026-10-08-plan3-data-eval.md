@@ -62,7 +62,7 @@ jev-chat-api/
 - `TEMPLATE_VERSION`은 `"v1"` 그대로(팩 manifest 호환성 검사 기준). trace에는 언어가 붙은 라벨이 기록된다.
 - [E3] `applyOptionOrder(req: JevRequest, order: "normal" | "reversed"): JevRequest` — **빌드(크기 축소) 이후** payload에서 `intent`·`faq` criteria의 키 순서를 뒤집는다(`none`은 항상 마지막). 전송 후보 집합은 바뀌지 않는다. `TypesafeJudge` deps에 `optionOrder?: "normal" | "reversed"`(기본 normal)를 추가해 빌드 직후 적용한다.
 
-- [ ] **Step 1: 실패 테스트 작성** (`templates.spec.ts`에 추가 — import 목록에 `applyOptionOrder`, `templateVersionLabel`, `faqFixture`, `chunkFixture`를 추가하고, `core/index.ts`에서 `applyOptionOrder`·`templateVersionLabel`·`TemplateLang`을 재수출)
+- [x] **Step 1: 실패 테스트 작성** (`templates.spec.ts`에 추가 — import 목록에 `applyOptionOrder`, `templateVersionLabel`, `faqFixture`, `chunkFixture`를 추가하고, `core/index.ts`에서 `applyOptionOrder`·`templateVersionLabel`·`TemplateLang`을 재수출)
 
 ```ts
 describe("템플릿 언어", () => {
@@ -110,11 +110,11 @@ describe("템플릿 언어", () => {
 ```
 `typesafe-judge.spec.ts`에 추가: `lang: "ko"`로 만든 judge가 보낸 payload의 intent 지시문이 한국어인지 확인.
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `pnpm --filter jev-chat-api test -- templates typesafe-judge` → FAIL
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 `templates.ts`: 영어 문자열을 `TEXT.en`, 한국어를 `TEXT.ko`로 묶고 빌더가 `lang`으로 고른다. 한국어 문구:
 ```ts
@@ -177,7 +177,7 @@ export function applyOptionOrder(req: JevRequest, order: "normal" | "reversed"):
 `jev.module.ts`: `new TypesafeJudge({ ..., lang: env.JEV_TEMPLATE_LANG })`.
 `snapshot.service.ts`: opts에 `templateLang: TemplateLang` 추가, `templateVersion: templateVersionLabel(opts.templateLang)`. `app.module.ts`의 팩토리에 `templateLang: env.JEV_TEMPLATE_LANG` 전달. 관련 기존 테스트의 `new SnapshotService(..., { limiterWaitMs })` 호출에 `templateLang: "en"` 추가.
 
-- [ ] **Step 4: 실행 → 통과 + 커밋**
+- [x] **Step 4: 실행 → 통과 + 커밋**
 
 Run: `pnpm --filter jev-chat-api test && pnpm --filter jev-chat-api typecheck` → PASS
 ```bash
@@ -210,7 +210,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - `allowed_outcomes`에 `REFERENCE`가 있으면 `acceptable_chunk_ids`가 비어 있지 않다.
 - 모든 ID 배열은 중복 없음.
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/eval/load-set.spec.ts`:
 ```ts
@@ -324,9 +324,9 @@ describe("오프라인 스냅샷", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인** — Run: `pnpm --filter jev-chat-api test -- eval/` → FAIL
+- [x] **Step 2: 실행 → 실패 확인** — Run: `pnpm --filter jev-chat-api test -- eval/` → FAIL
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 `jev-chat-api/src/eval/eval-item.ts`:
 ```ts
@@ -525,7 +525,7 @@ export class ItemContextReader implements ContextReader {
 }
 ```
 
-- [ ] **Step 4: 실행 → 통과 + 커밋**
+- [x] **Step 4: 실행 → 통과 + 커밋**
 
 Run: `pnpm --filter jev-chat-api test -- eval/ && pnpm --filter jev-chat-api typecheck` → PASS
 ```bash

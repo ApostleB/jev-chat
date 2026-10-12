@@ -1,25 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import { INTENT_IDS } from "../core";
+import { EvalItemSchema } from "../eval/eval-item";
 import { buildExportItem, type ContextTurnLike, type ReviewLike } from "./export-reviews.lib";
 
-/** 계획 3 EvalItemSchema(Task 2)의 expect 규칙 중 export가 지켜야 하는 부분을 그대로 옮긴 계약 검사 */
-const Outcome = z.enum(["ANSWER", "REFERENCE", "HOLD", "BLOCK", "ERROR"]);
-const Ids = z.array(z.string().min(1));
-const ReadyItem = z.object({
-  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
-  type: z.enum(["followup", "from_review"]),
-  turns: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().min(1), sources: Ids.optional() })),
-  message: z.string().min(1).max(1000),
-  expect: z.object({
-    intent: z.enum(INTENT_IDS).optional(), // null 금지, 생략만 허용
-    allowed_outcomes: z.array(Outcome).min(1),
-    faq_ids: Ids.optional(),
-    acceptable_chunk_ids: Ids.optional(),
-    required_chunk_ids_any: Ids.optional(),
-    attack_goal: z.null(),
-  }),
-});
+/** export가 만든 ready 항목은 실제 평가 스키마를 통과해야 하며, 검수 내보내기 유형(followup/from_review, 공격 목표 없음)이어야 한다 */
+const ReadyItem = EvalItemSchema.refine((i) => (i.type === "followup" || i.type === "from_review") && i.expect.attack_goal === null, "export 유형 위반");
 
 const review = (over: Omit<Partial<ReviewLike>, "trace"> & { trace?: Partial<ReviewLike["trace"]> } = {}): ReviewLike => ({
   id: "00000000-0000-4000-8000-000000000001",
