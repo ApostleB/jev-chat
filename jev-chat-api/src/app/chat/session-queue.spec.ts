@@ -59,4 +59,17 @@ describe("SessionQueue", () => {
     await tick();
     expect(log).toEqual(["next"]);
   });
+
+  it("[M-3] run 작업 예외는 삼키지 않고 onError로 알린다(onError가 던져도 체인은 계속)", async () => {
+    const seen: unknown[] = [];
+    const q = new SessionQueue({ capacity: 5, onError: (e) => { seen.push(e); throw new Error("log down"); } });
+    const log: string[] = [];
+    q.run("s", async () => { throw new Error("boom"); });
+    q.run("s", async () => { log.push("next"); });
+    await tick();
+    await tick();
+    expect(seen).toHaveLength(1);
+    expect((seen[0] as Error).message).toBe("boom");
+    expect(log).toEqual(["next"]);
+  });
 });

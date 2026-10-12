@@ -20,7 +20,7 @@ const chatLog = new Logger("ChatService");
           store,
           snapshots,
           judge,
-          queue: new SessionQueue({ capacity: 5 }),
+          queue: new SessionQueue({ capacity: 5, onError: (err) => chatLog.error(`세션 작업 실패: ${(err as Error)?.name ?? "unknown"}`) }),
           sendLimiter: new SlidingWindowRateLimiter(10, 60_000),
           sessionLimiter: new SlidingWindowRateLimiter(20, 60_000),
           replayLimiter: new SlidingWindowRateLimiter(30, 60_000),

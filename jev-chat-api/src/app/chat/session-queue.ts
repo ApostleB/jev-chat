@@ -9,7 +9,8 @@ export class SessionQueue {
   private readonly chains = new Map<string, Promise<void>>();
   private readonly slots = new Map<string, number>();
 
-  constructor(private readonly opts: { capacity: number }) {}
+  /** onError: 작업 예외를 받는 로그 포트. 예외 이름만 넘기는 것을 권장(질문 원문·스택 금지). */
+  constructor(private readonly opts: { capacity: number; onError?: (err: unknown) => void }) {}
 
   withLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.locks.get(sessionId) ?? Promise.resolve();
@@ -44,7 +45,13 @@ export class SessionQueue {
 
   run(sessionId: string, task: () => Promise<void>): void {
     const prev = this.chains.get(sessionId) ?? Promise.resolve();
-    const next = prev.then(task).catch(() => undefined);
+    const next = prev.then(task).catch((e) => {
+      try {
+        this.opts.onError?.(e);
+      } catch {
+        // 로그 실패가 체인을 막지 않게 한다
+      }
+    });
     this.chains.set(sessionId, next);
     void next.then(() => {
       if (this.chains.get(sessionId) === next) this.chains.delete(sessionId);

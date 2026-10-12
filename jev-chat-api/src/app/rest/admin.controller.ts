@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, Inject, Post, Query, UseGuards } from "@nestjs/common";
+import { Controller, Get, HttpCode, Inject, Logger, Post, Query, UseGuards } from "@nestjs/common";
 import { z } from "zod";
 import type { AdminConfig, KnowledgeChunkItem, KnowledgeFaqItem, Page, ReloadResponse } from "@jev-chat/protocol";
 import { JEV_MODEL, TEMPLATE_VERSION } from "../../core";
@@ -16,6 +16,7 @@ const PageQuery = z.object({ cursor: IdCursor.optional(), limit: z.coerce.number
 @UseGuards(HttpAuthGuard)
 @Roles("admin")
 export class AdminController {
+  private readonly log = new Logger(AdminController.name);
   private readonly reloadLimiter = new SlidingWindowRateLimiter(6, 60_000);
 
   constructor(
@@ -64,6 +65,7 @@ export class AdminController {
       return await this.snapshots.reload();
     } catch (e) {
       if (e instanceof NoActiveKnowledgeError) throw new ApiException("NOT_FOUND");
+      this.log.error(`지식 재로드 실패: ${(e as Error)?.name ?? "unknown"}`); // 이름만 기록(메시지에 DB 값이 섞일 수 있다)
       throw new ApiException("INTERNAL");
     }
   }
