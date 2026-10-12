@@ -413,7 +413,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `interface ChatEvents { status(e: ChatStatusEvent): void; done(e: ChatDoneEvent): void; error(e: ChatErrorEvent): void; trace(sessionId: string, e: ChatTraceEvent): void }`
   - `type TurnStore = Pick<TurnRepository, "findSession" | "createSession" | "findTurnByClientMsgId" | "reserveTurn" | "completeTurn" | "failTurn" | "listTurns" | "loadCompletedTurns">`
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `packages/protocol/src/rest.spec.ts`:
 ```ts
@@ -479,12 +479,12 @@ describe("turn-mapper (프로토콜 스키마를 실제로 통과해야 한다)"
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인**
+- [x] **Step 2: 실행 → 실패 확인**
 
 Run: `pnpm --filter @jev-chat/protocol test && pnpm --filter jev-chat-api test -- turn-mapper`
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 `packages/protocol/src/rest.ts`:
 ```ts
@@ -660,12 +660,12 @@ export type TurnStore = Pick<
 export const TURN_STORE = Symbol("TURN_STORE");
 ```
 
-- [ ] **Step 4: 실행 → 통과 확인**
+- [x] **Step 4: 실행 → 통과 확인**
 
 Run: `pnpm --filter @jev-chat/protocol test && pnpm --filter @jev-chat/protocol build && pnpm --filter jev-chat-api test -- turn-mapper && pnpm typecheck`
 Expected: PASS
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add packages/protocol jev-chat-api/src/app/chat

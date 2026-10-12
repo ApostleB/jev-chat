@@ -4,6 +4,7 @@ import {
   ChatDoneEventSchema,
   ChatSendRequestSchema,
   ChatSendResponseSchema,
+  ChatTraceEventSchema,
   MessageTextSchema,
   RouteSchema,
   SessionStartResponseSchema,
@@ -95,6 +96,15 @@ describe("ChatDoneEventSchema / SessionStartResponseSchema", () => {
   });
   it("정상 done에 error가 있으면 거부한다", () => {
     expect(ChatDoneEventSchema.safeParse({ ...doneBase, error: { code: "INTERNAL", retryable: false } }).success).toBe(false);
+  });
+});
+
+describe("ChatTraceEventSchema", () => {
+  it("sessionId가 있으면 통과한다", () => {
+    expect(ChatTraceEventSchema.safeParse({ sessionId: uuid, traceId: "tr1", trace: {} }).success).toBe(true);
+  });
+  it("sessionId가 없으면 거부한다", () => {
+    expect(ChatTraceEventSchema.safeParse({ traceId: "tr1", trace: {} }).success).toBe(false);
   });
 });
 

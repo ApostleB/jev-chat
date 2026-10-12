@@ -122,6 +122,7 @@ export type ChatErrorEvent = z.infer<typeof ChatErrorEventSchema>;
 
 // trace 본문 구조는 계획 2에서 확정한다. 프로토콜은 JSON 객체임만 보장한다.
 export const ChatTraceEventSchema = z.object({
+  sessionId: UuidSchema,
   traceId: z.string(),
   trace: z.record(z.string(), z.unknown()),
 });
