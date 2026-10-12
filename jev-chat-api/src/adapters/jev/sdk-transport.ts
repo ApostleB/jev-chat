@@ -56,9 +56,12 @@ export function toTransportError(err: unknown, callerSignal: AbortSignal): JevTr
   return null;
 }
 
-/** 토큰 수 상한. DB Int 컬럼(INT, 2^31-1)에 맞춘다. */
-const MAX_TOKEN_COUNT = 2_147_483_647;
-const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= MAX_TOKEN_COUNT;
+/**
+ * 호출 1건의 현실적 usage 상한. 호출 수(A 1 + B ≤ 12)를 곱해도 trace 합계가 INT 범위(2^31-1) 안이다.
+ * 초과는 clamp하지 않고 형식 오류(JevResponseError → invalid_response, 재시도 없음)로 거부한다.
+ */
+const MAX_USAGE_TOKENS_PER_CALL = 1_000_000;
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= MAX_USAGE_TOKENS_PER_CALL;
 
 /** 200 응답의 형태 검증. 본문·헤더는 메시지에 담지 않는다. answers 내용은 core 파서가 검증한다. */
 function checkShape(res: unknown): { model: string; answers: unknown; usage: { input_tokens: number; output_tokens: number } } {

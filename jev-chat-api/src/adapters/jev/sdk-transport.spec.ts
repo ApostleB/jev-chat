@@ -139,9 +139,20 @@ describe("SdkJevTransport", () => {
     await expect(transport(zero.fn).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 })).resolves.toMatchObject({ usage: { inputTokens: 0, outputTokens: 0 } });
   });
 
-  it("[R4] 토큰 수 상한 2147483647(INT 최대)은 허용", async () => {
-    const max = fakeFetch(200, { model: "jev-1.13.0", answers: {}, usage: { input_tokens: 2147483647, output_tokens: 2147483647 } });
-    await expect(transport(max.fn).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 })).resolves.toMatchObject({ usage: { inputTokens: 2147483647, outputTokens: 2147483647 } });
+  it("[R4·D1] 호출 1건의 usage 상한은 1,000,000 — 0과 1,000,000은 허용, 초과는 JevResponseError(clamp 없음, 1회만 호출)", async () => {
+    const send = (f: typeof fetch) => transport(f).send(payload, { signal: new AbortController().signal, timeoutMs: 1000 });
+    const max = fakeFetch(200, { model: "jev-1.13.0", answers: {}, usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } });
+    await expect(send(max.fn)).resolves.toMatchObject({ usage: { inputTokens: 1_000_000, outputTokens: 1_000_000 } });
+    const zero = fakeFetch(200, { model: "jev-1.13.0", answers: {}, usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(send(zero.fn)).resolves.toMatchObject({ usage: { inputTokens: 0, outputTokens: 0 } });
+    for (const over of [1_000_001, 2147483647, 1e20]) {
+      for (const usage of [{ input_tokens: over, output_tokens: 1 }, { input_tokens: 1, output_tokens: over }]) {
+        const f = fakeFetch(200, { model: "jev-1.13.0", answers: {}, usage });
+        const err = await send(f.fn).catch((e) => e);
+        expect(err, JSON.stringify(usage)).toBeInstanceOf(JevResponseError);
+        expect(f.calls).toHaveLength(1);
+      }
+    }
   });
 
   it("[6-5] SDK 호출에 시도 타임아웃(timeout)을 넘겨 SDK 기본값이 덮지 않게 한다", async () => {
