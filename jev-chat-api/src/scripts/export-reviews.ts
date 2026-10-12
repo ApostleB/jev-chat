@@ -2,17 +2,7 @@ import "dotenv/config";
 import { writeFileSync } from "node:fs";
 import { createPrismaClient } from "../adapters/persistence/prisma";
 import { validateEnv } from "../app/config/env.schema";
-
-type Outcome = "ANSWER" | "REFERENCE" | "HOLD" | "BLOCK" | "ERROR";
-type SourceLike = { chunkId: string };
-
-function routeToOutcome(route: string): Outcome {
-  if (route === "faq" || route === "extractive") return "ANSWER";
-  if (route === "reference") return "REFERENCE";
-  if (route === "blocked") return "BLOCK";
-  if (route === "error") return "ERROR";
-  return "HOLD";
-}
+import { buildExportItem } from "./export-reviews.lib";
 
 /**
  * [B10] 검수 결과를 설계 6장 평가 항목 형식으로 내보낸다(tune 후보 전용).
@@ -34,45 +24,8 @@ async function main(): Promise<void> {
       const ctxRows = data.contextTurnSeqs?.length
         ? await prisma.chatTurn.findMany({ where: { sessionId: turn.sessionId, turnSeq: { in: data.contextTurnSeqs } }, orderBy: { turnSeq: "asc" } })
         : [];
-      const turns = ctxRows.flatMap((t) => [
-        { role: "user", text: t.userText },
-        { role: "assistant", text: t.assistantText ?? "", sources: ((t.sources as SourceLike[] | null) ?? []).map((s) => s.chunkId) },
-      ]);
-      const shown = ((turn.sources as SourceLike[] | null) ?? []).map((s) => s.chunkId);
-      const outcome = routeToOutcome(r.trace.route);
-      const expectedChunks = Array.isArray(r.expectedChunkIds) && r.expectedChunkIds.length > 0 ? (r.expectedChunkIds as string[]) : null;
-      // 보관 기간 정리 등으로 참조 턴 일부가 사라졌으면 문맥이 불완전하다 → 자동 라벨 금지
-      const contextComplete = ctxRows.length === (data.contextTurnSeqs?.length ?? 0);
-
-      let expect: Record<string, unknown> | null = null;
-      if (!contextComplete) {
-        expect = null;
-      } else if (r.verdict === "correct") {
-        expect = {
-          intent: r.expectedIntent ?? r.trace.intent,
-          allowed_outcomes: [outcome],
-          ...(r.trace.route === "faq" && r.trace.faqChoice ? { faq_ids: [r.trace.faqChoice] } : {}),
-          ...((outcome === "ANSWER" || outcome === "REFERENCE") && shown.length > 0 ? { acceptable_chunk_ids: shown, required_chunk_ids_any: shown } : {}),
-          attack_goal: null,
-        };
-      } else if (r.expectedFaqId || expectedChunks) {
-        expect = {
-          intent: r.expectedIntent ?? r.trace.intent,
-          allowed_outcomes: ["ANSWER"],
-          ...(r.expectedFaqId ? { faq_ids: [r.expectedFaqId] } : {}),
-          ...(expectedChunks ? { acceptable_chunk_ids: expectedChunks, required_chunk_ids_any: expectedChunks } : {}),
-          attack_goal: null,
-        };
-      }
-      const item = {
-        id: `review-${r.id}`,
-        type: turns.length > 0 ? "followup" : "from_review",
-        knowledge_version_id: r.trace.knowledgeVersionId,
-        turns,
-        message: turn.userText,
-        ...(expect ? { expect } : { review: { verdict: r.verdict, note: r.note, route: r.trace.route, contextComplete } }),
-      };
-      (expect ? ready : pending).push(JSON.stringify(item));
+      const { ready: isReady, item } = buildExportItem(r, ctxRows);
+      (isReady ? ready : pending).push(JSON.stringify(item));
     }
     writeFileSync(out, ready.join("\n") + (ready.length ? "\n" : ""));
     writeFileSync(needsLabeling, pending.join("\n") + (pending.length ? "\n" : ""));
