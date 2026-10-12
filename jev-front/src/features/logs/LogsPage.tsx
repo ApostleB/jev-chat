@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, errorText } from "@/lib/api";
 import { turnErrorText } from "@/lib/turn-error-text";
+import { formatDateTime } from "@/lib/format-time";
 import { INTENT_IDS } from "@/lib/intents";
 import { useCursorList } from "@/lib/use-cursor-list";
 import { TraceSheet } from "./TraceSheet";
@@ -29,6 +30,7 @@ export function LogsPage({ enabled, authEpoch }: { enabled: boolean; authEpoch: 
     getNextPageParam: (last) => (last.hasMore ? (last.nextBeforeTurnSeq ?? undefined) : undefined),
     enabled: enabled && !!sid,
   });
+  const select = (s: SessionSummary) => { setSession(s); setTraceId(null); };
   if (!enabled) return <p className="p-6 text-sm">토큰을 먼저 입력하세요.</p>;
   // 페이지는 최신 → 과거 순으로 받으므로 뒤집어 turn_seq 오름차순으로 이어 붙인다(각 페이지 내부는 서버 순서 그대로)
   const turnList = turns.data ? [...turns.data.pages].reverse().flatMap((p) => p.turns) : [];
@@ -60,10 +62,11 @@ export function LogsPage({ enabled, authEpoch }: { enabled: boolean; authEpoch: 
             </TableHeader>
             <TableBody>
               {sessions.items.map((s) => (
-                <TableRow key={s.id} data-state={s.id === sid ? "selected" : undefined}>
-                  <TableCell>{s.createdAt}</TableCell>
-                  <TableCell>{s.lastActiveAt}</TableCell>
-                  <TableCell><button type="button" className="underline" onClick={() => { setSession(s); setTraceId(null); }}>{s.userId}</button></TableCell>
+                <TableRow key={s.id} data-state={s.id === sid ? "selected" : undefined} className="cursor-pointer" onClick={() => select(s)}>
+                  <TableCell>{formatDateTime(s.createdAt)}</TableCell>
+                  <TableCell>{formatDateTime(s.lastActiveAt)}</TableCell>
+                  {/* 행 전체가 클릭 대상이지만 키보드 접근은 이 버튼이 맡는다(Enter/Space는 click으로 오며 행 onClick과 같은 동작이라 중복 선택은 무해) */}
+                  <TableCell><button type="button" className="underline" aria-pressed={s.id === sid} onClick={() => select(s)}>{s.userId}</button></TableCell>
                   <TableCell>{s.turnCount}</TableCell>
                 </TableRow>
               ))}

@@ -122,6 +122,32 @@ describe("LogsPage", () => {
     expect(within(dialog).queryByRole("textbox")).toBeNull();
   });
 
+  it("[S4] 시각은 ISO 원문이 아니라 YYYY-MM-DD HH:mm:ss로 보인다", async () => {
+    stubRest((u) => (u.pathname === "/api/sessions" ? { status: 200, body: { items: [session(SID, "2026-10-12T16:17:04.012Z", "2026-10-12T16:20:00Z")], nextCursor: null } } : undefined));
+    renderWithQuery(<LogsPage enabled authEpoch={0} />);
+    await screen.findByText("u1");
+    expect(screen.queryByText("2026-10-12T16:17:04.012Z")).toBeNull();
+    const cells = screen.getAllByRole("cell").map((c) => c.textContent);
+    expect(cells.filter((c) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(c ?? ""))).toHaveLength(2);
+  });
+
+  it("[S4] 행의 어느 칸을 눌러도 세션이 선택되고 선택된 행이 강조된다(버튼 키보드 접근 유지)", async () => {
+    stubRest((u) => {
+      if (u.pathname === "/api/sessions") return { status: 200, body: { items: [session(SID, "2026-10-12T00:00:00Z", "2026-10-12T00:01:00Z", "userA", 7), session(uuid(2), "2026-10-11T00:00:00Z", "2026-10-11T00:01:00Z", "userB", 1)], nextCursor: null } };
+      if (u.pathname === `/api/sessions/${SID}/turns`) return { status: 200, body: { turns: [turn(3)], hasMore: false } };
+      return undefined;
+    });
+    renderWithQuery(<LogsPage enabled authEpoch={0} />);
+    const rowA = (await screen.findByText("userA")).closest("tr")!;
+    expect(rowA.getAttribute("data-state")).toBeNull();
+    await userEvent.click(within(rowA).getByText("7")); // 턴 수 칸
+    expect(await screen.findByText("질문 3")).toBeTruthy();
+    expect(rowA.getAttribute("data-state")).toBe("selected");
+    expect(screen.getByText("userB").closest("tr")!.getAttribute("data-state")).toBeNull();
+    expect(within(rowA).getByRole("button", { name: "userA" }).getAttribute("aria-pressed")).toBe("true");
+    expect(rowA.className).toContain("cursor-pointer");
+  });
+
   it("[S3] failed 턴은 오류 코드를 한국어 안내로 보여준다", async () => {
     stubRest((u) => {
       if (u.pathname === "/api/sessions") return { status: 200, body: { items: [session(SID, "2026-10-12T00:00:00Z", "2026-10-12T00:01:00Z")], nextCursor: null } };
