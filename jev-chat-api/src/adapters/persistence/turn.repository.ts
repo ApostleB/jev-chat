@@ -52,7 +52,17 @@ function toRow(t: TurnWithTrace): TurnRow {
   };
 }
 
+/** DB INT(부호 있음) 컬럼의 최대값 2^31-1. message_traces.total_input_tokens의 저장 범위다. */
+const DB_INT_MAX = 2_147_483_647;
+
 function traceColumns(turnId: string, trace: TraceRecord) {
+  // [D1] 방어 계약: 호출당 usage 상한(1M, sdk-transport)과 호출 수(≤13) 때문에 정상 경로에서 합계가 INT를 넘을 수 없다.
+  // 그래도 범위 밖(초과·음수·비정수)이면 저장을 실패시키지 않고 컬럼은 NULL, data에는 원래 trace를 그대로 두고
+  // storage.totalInputTokensOutOfRange=true로 초과 사실을 표시한다(clamp로 값을 왜곡하지 않는다).
+  const total = trace.totalInputTokens;
+  const inRange = Number.isSafeInteger(total) && total >= 0 && total <= DB_INT_MAX;
+  const data = JSON.parse(JSON.stringify(trace)) as Record<string, unknown>;
+  if (!inRange) data.storage = { totalInputTokensOutOfRange: true };
   return {
     turnId,
     knowledgeVersionId: trace.knowledgeVersionId,
@@ -66,9 +76,9 @@ function traceColumns(turnId: string, trace: TraceRecord) {
     faqProb: trace.faqProb,
     faqConfidence: trace.faqConfidence,
     bStatus: trace.bStatus,
-    totalInputTokens: trace.totalInputTokens,
+    totalInputTokens: inRange ? total : null,
     errorCode: trace.errorCode,
-    data: JSON.parse(JSON.stringify(trace)) as object,
+    data: data as object,
   };
 }
 

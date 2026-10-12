@@ -69,6 +69,37 @@ describe.runIf(prisma)("TurnRepository (통합)", () => {
     expect(trace).toMatchObject({ totalInputTokens: 123, bStatus: "skipped", intent: "regulation" });
   });
 
+  it("[D1] trace 토큰 합계가 INT를 넘으면 완료는 성공하고 컬럼은 NULL, data에 원값과 초과 표시를 남긴다", async () => {
+    const s = await repo.createSession("u1", "front-test");
+    const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });
+    const r = result("답");
+    // 개별 호출 usage는 각각 INT 이하지만 합계는 INT(2147483647) 초과
+    const call = { status: "ok" as const, attempts: 1, latencyMs: 1, usage: { inputTokens: 2_000_000_000, outputTokens: 1 } };
+    r.trace.jevCalls = [{ call: "turn", ...call }, { call: "relevance", chunkId: "c1", ...call }];
+    r.trace.totalInputTokens = 4_000_000_000;
+    const done = await repo.completeTurn(t.id, r);
+    expect(done?.traceId).toBeTruthy();
+    expect(await repo.findTurnByClientMsgId(s.id, uuid(1))).toMatchObject({ status: "completed", traceId: done?.traceId });
+    const trace = await prisma!.messageTrace.findUnique({ where: { turnId: t.id } });
+    expect(trace?.totalInputTokens).toBeNull();
+    const data = trace?.data as { totalInputTokens?: unknown; storage?: { totalInputTokensOutOfRange?: unknown } };
+    expect(data.totalInputTokens).toBe(4_000_000_000);
+    expect(data.storage?.totalInputTokensOutOfRange).toBe(true);
+  });
+
+  it("[D1] trace 토큰 합계가 정확히 2147483647이면 컬럼에 그대로 저장하고 초과 표시가 없다", async () => {
+    const s = await repo.createSession("u1", "front-test");
+    const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });
+    const r = result("답");
+    r.trace.totalInputTokens = 2_147_483_647;
+    await repo.completeTurn(t.id, r);
+    const trace = await prisma!.messageTrace.findUnique({ where: { turnId: t.id } });
+    expect(trace?.totalInputTokens).toBe(2_147_483_647);
+    const data = trace?.data as { totalInputTokens?: unknown; storage?: unknown };
+    expect(data.totalInputTokens).toBe(2_147_483_647);
+    expect(data.storage).toBeUndefined();
+  });
+
   it("[P4] route=error 완료는 error 메타데이터를 함께 저장, 정상 완료는 비운다", async () => {
     const s = await repo.createSession("u1", "front-test");
     const t = await repo.reserveTurn({ sessionId: s.id, clientMsgId: uuid(1), userText: "q" });

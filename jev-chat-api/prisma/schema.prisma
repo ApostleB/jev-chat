@@ -151,7 +151,7 @@ model MessageTrace {
   faqProb            Float?          @map("faq_prob")
   faqConfidence      Float?          @map("faq_confidence")
   bStatus            String          @map("b_status") @db.VarChar(20)
-  totalInputTokens   Int             @map("total_input_tokens")
+  totalInputTokens   Int?            @map("total_input_tokens")
   errorCode          String?         @map("error_code") @db.VarChar(40)
   data               Json
   createdAt          DateTime        @default(now()) @map("created_at") @db.DateTime(3)
