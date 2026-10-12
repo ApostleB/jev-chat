@@ -20,3 +20,20 @@ describe("AdminController.reload", () => {
     expect(logged).not.toContain("secret");
   });
 });
+
+describe("AdminController.config — templateVersion", () => {
+  const limiter = () => new SlidingWindowRateLimiter(30, 60_000);
+  const knowledge = { findVersion: async () => ({ packName: "p", packVersion: "1" }) };
+
+  it("스냅샷이 있으면 실제 사용 중인 템플릿 라벨(스냅샷 값)을 내보낸다", async () => {
+    const snapshots = { current: () => ({ knowledgeVersionId: "kv", templateVersion: "v1-ko", policy: {} }), templateVersionLabel: () => "v1-en" };
+    const ctrl = new AdminController(snapshots as never, knowledge as never, limiter());
+    expect((await ctrl.config()).templateVersion).toBe("v1-ko");
+  });
+
+  it("활성 지식이 없어도 서버 설정 언어의 라벨을 내보낸다(고정 v1 아님)", async () => {
+    const snapshots = { current: () => { throw new Error("none"); }, templateVersionLabel: () => "v1-ko" };
+    const ctrl = new AdminController(snapshots as never, knowledge as never, limiter());
+    expect((await ctrl.config()).templateVersion).toBe("v1-ko");
+  });
+});

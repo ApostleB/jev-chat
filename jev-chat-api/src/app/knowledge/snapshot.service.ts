@@ -41,6 +41,11 @@ export class SnapshotService {
     private readonly opts: { limiterWaitMs: number; templateLang: TemplateLang },
   ) {}
 
+  /** 서버가 사용하는 질문 템플릿 라벨(스냅샷의 templateVersion과 같은 출처). 활성 지식이 없어도 항상 값을 낸다. */
+  templateVersionLabel(): string {
+    return templateVersionLabel(this.opts.templateLang);
+  }
+
   /** 활성 팩이 템플릿과 호환되지 않으면 TemplateVersionMismatchError로 부팅을 실패시킨다(조용히 잘못 동작하지 않음). */
   async init(): Promise<void> {
     const a = await this.loader.loadActive();

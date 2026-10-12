@@ -1,7 +1,7 @@
 import { Controller, Get, HttpCode, Inject, Logger, Post, Query, UseGuards } from "@nestjs/common";
 import { z } from "zod";
 import type { AdminConfig, KnowledgeChunkItem, KnowledgeFaqItem, Page, ReloadResponse } from "@jev-chat/protocol";
-import { JEV_MODEL, TEMPLATE_VERSION } from "../../core";
+import { JEV_MODEL } from "../../core";
 import { KnowledgeRepository } from "../../adapters/persistence/knowledge.repository";
 import type { AuthedPrincipal } from "../auth/auth.types";
 import { CurrentPrincipal, HttpAuthGuard, Roles } from "../auth/http-auth.guard";
@@ -48,7 +48,7 @@ export class AdminController {
       packName: v?.packName ?? null,
       packVersion: v?.packVersion ?? null,
       model: JEV_MODEL,
-      templateVersion: TEMPLATE_VERSION,
+      templateVersion: snap?.templateVersion ?? this.snapshots.templateVersionLabel(),
       policy: snap ? (JSON.parse(JSON.stringify(snap.policy)) as Record<string, unknown>) : null,
     };
   }
