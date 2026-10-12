@@ -8,7 +8,8 @@ import { validateEnv } from "./config/env.schema";
 
 async function bootstrap(): Promise<void> {
   const env = validateEnv(process.env);
-  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(env));
+  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(env), { bodyParser: false });
+  // REST는 JSON만 받는다 — 기본 urlencoded(100KB) 파서를 끄고 json 8KB만 등록
   app.useBodyParser("json", { limit: "8kb" });
   app.enableCors({ origin: env.CORS_ORIGINS, credentials: false });
   app.useWebSocketAdapter(new ConfiguredIoAdapter(app, env.CORS_ORIGINS));

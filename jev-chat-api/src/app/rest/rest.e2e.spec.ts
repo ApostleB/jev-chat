@@ -95,6 +95,19 @@ describe.runIf(enabled)("REST E2E (통합)", () => {
     expect(ApiErrorSchema.parse(await missing.json()).error.code).toBe("NOT_FOUND");
   });
 
+  it("[B9] urlencoded 본문은 파싱하지 않는다 → 400 ApiError, 검수 미저장", async () => {
+    const reviewCount = async () => TraceDetailSchema.parse(await (await get(`/api/traces/${traceId}`, "admin")).json()).reviews.length;
+    const before = await reviewCount();
+    const r = await fetch(`${url}/api/traces/${traceId}/review`, {
+      method: "POST",
+      headers: { authorization: "Bearer admin", "content-type": "application/x-www-form-urlencoded" },
+      body: `verdict=wrong&pad=${"a".repeat(9000)}`,
+    });
+    expect(r.status).toBe(400);
+    expect(ApiErrorSchema.parse(await r.json()).error.code).toBe("INVALID_INPUT");
+    expect(await reviewCount()).toBe(before);
+  });
+
   it("관리: config 조회, 지식 목록, 재로드", async () => {
     expect((await get("/api/admin/config", "alice")).status).toBe(403);
     const cfg = AdminConfigSchema.parse(await (await get("/api/admin/config", "admin")).json());

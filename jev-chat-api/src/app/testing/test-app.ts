@@ -33,7 +33,8 @@ export async function createTestApp(opts: { judge: Judge; auth: AuthProvider }):
     .overrideProvider(JUDGE).useValue(opts.judge)
     .overrideProvider(AUTH_PROVIDER).useValue(opts.auth)
     .compile();
-  const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
+  const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false, bodyParser: false });
+  // REST는 JSON만 받는다 — 기본 urlencoded(100KB) 파서를 끄고 json 8KB만 등록
   app.useBodyParser("json", { limit: "8kb" }); // [B9] main.ts와 동일
   app.useWebSocketAdapter(new ConfiguredIoAdapter(app, env.CORS_ORIGINS));
   await app.listen(0);
