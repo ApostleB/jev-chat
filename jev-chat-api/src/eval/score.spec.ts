@@ -90,3 +90,68 @@ describe("[E3] combineOrderScores", () => {
     expect(combineOrderScores(it2, good, good).orderMismatch).toBe(false);
   });
 });
+
+describe("실패 원인 기록 failureCause", () => {
+  const errItem = () => item({ faq_ids: ["f1"] });
+  const err = (calls: JevCallAudit[], extra: Record<string, unknown> = {}) => {
+    const r = result("error", { jevCalls: calls });
+    Object.assign(r.trace, extra);
+    return r;
+  };
+  it("limiter/timeout -> internal + 원인", () => {
+    const s = scoreItem(errItem(), err([call({ call: "turn", errorKind: "timeout", cause: { source: "limiter", kind: "timeout" } })]));
+    expect(s.failure).toBe("internal");
+    expect(s.failureCause).toEqual([{ call: "turn", status: "failed", errorKind: "timeout", source: "limiter", kind: "timeout" }]);
+  });
+  it("transport/server -> provider + 원인(httpStatus)", () => {
+    const s = scoreItem(errItem(), err([call({ errorKind: "provider", cause: { source: "transport", kind: "server", status: 503 } })]));
+    expect(s.failure).toBe("provider");
+    expect(s.failureCause).toEqual([{ call: "turn", status: "failed", errorKind: "provider", source: "transport", kind: "server", httpStatus: 503 }]);
+  });
+  it("response 원인 -> internal", () => {
+    const s = scoreItem(errItem(), err([call({ errorKind: "invalid_response", cause: { source: "response" } })]));
+    expect(s.failure).toBe("internal");
+    expect(s.failureCause).toEqual([{ call: "turn", status: "failed", errorKind: "invalid_response", source: "response" }]);
+  });
+  it("turn이 실패면 relevance는 보지 않고, turn이 ok면 실패한 relevance들을 기록", () => {
+    const s = scoreItem(errItem(), err([
+      call({ call: "turn", status: "ok" }),
+      call({ call: "relevance", chunkId: "c1", cause: { source: "transport", kind: "timeout" } }),
+      call({ call: "relevance", chunkId: "c2", cause: { source: "limiter", kind: "oversized" } }),
+    ]));
+    expect(s.failure).toBe("internal");
+    expect(s.failureCause).toHaveLength(2);
+  });
+  it("결정적 호출 없음 -> internal + 빈 배열 + trace 단서", () => {
+    const s = scoreItem(errItem(), err([], { errorCode: "JEV_UNAVAILABLE", bStatus: "failed" }));
+    expect(s.failure).toBe("internal");
+    expect(s.failureCause).toEqual([]);
+    expect(s.failureNote).toBe("errorCode=JEV_UNAVAILABLE bStatus=failed");
+  });
+  it("failure none이면 필드 없음", () => {
+    const s = scoreItem(errItem(), result("faq", { faqChoice: "f1" }));
+    expect(s.failureCause).toBeUndefined();
+    expect(s.failureNote).toBeUndefined();
+  });
+  it("thrown -> failureNote는 오류 이름만", () => {
+    const e = new TypeError("secret sk-123");
+    const s = scoreItem(errItem(), { thrown: true, errorName: e.name });
+    expect(s.failureNote).toBe("TypeError");
+    expect(JSON.stringify(s)).not.toContain("sk-123");
+  });
+  it("thrown 오류 객체 없으면 note 없음", () => {
+    expect(scoreItem(errItem(), { thrown: true }).failureNote).toBeUndefined();
+  });
+  it("classifyFailure 판정은 그대로", () => {
+    expect(classifyFailure(err([call({ cause: { source: "transport", kind: "timeout" } })]).trace)).toBe("provider");
+  });
+  it("option_order 합성: 정·역 run 보존, 실패 방향 원인 합침", () => {
+    const it2 = item({ faq_ids: ["f1"] }, "option_order");
+    const bad = scoreItem(it2, err([call({ cause: { source: "limiter", kind: "timeout" } })]));
+    const good = scoreItem(it2, result("faq", { faqChoice: "f1" }));
+    const c = combineOrderScores(it2, good, bad);
+    expect(c.failureCause).toEqual(bad.failureCause);
+    expect(c.runs![1].failureCause).toEqual(bad.failureCause);
+    expect(combineOrderScores(it2, good, good).failureCause).toBeUndefined();
+  });
+});

@@ -120,6 +120,8 @@ describe("scores 파일 형식 [H1]", () => {
     const ok = { format: SCORES_FORMAT, scores: [{ id: "a", type: "normal" }] };
     expect(parseScoresFile(JSON.stringify(ok))).toHaveLength(1);
     expect(() => parseScoresFile(JSON.stringify([{ id: "a" }]))).toThrow(/형식/);
+    const withCause = { format: SCORES_FORMAT, scores: [{ id: "a", type: "normal", failure: "internal", failureCause: [{ call: "turn", status: "failed", source: "limiter", kind: "timeout" }], failureNote: "TypeError" }] };
+    expect(parseScoresFile(JSON.stringify(withCause))[0]).toMatchObject({ failureCause: [{ source: "limiter" }], failureNote: "TypeError" });
     expect(() => parseScoresFile(JSON.stringify({ format: SCORES_FORMAT, scores: [{ id: "o", type: "option_order" }] }))).toThrow(/runs/);
   });
 });

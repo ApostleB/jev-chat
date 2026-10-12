@@ -41,8 +41,9 @@ async function runOne(o: RunOpts, item: EvalItem, judge: Judge) {
       principal: { userId: "eval", roles: ["user"] }, sessionId: "eval", turnId: item.id, turnSeq: item.turns.length / 2 + 1, text: item.message, snapshot,
       signal: AbortSignal.timeout(snapshot.policy.deadlines.engineMs),
     });
-  } catch {
-    return { thrown: true as const };
+  } catch (e) {
+    // 오류 이름만 남긴다(메시지에 비밀이 섞일 수 있음)
+    return { thrown: true as const, errorName: e instanceof Error ? e.name : typeof e };
   }
 }
 
