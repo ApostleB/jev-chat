@@ -1,4 +1,4 @@
-import { Bm25Retriever, TEMPLATE_VERSION, type ExecutionSnapshot } from "../../core";
+import { Bm25Retriever, TEMPLATE_VERSION, templateVersionLabel, type ExecutionSnapshot, type TemplateLang } from "../../core";
 import type { ActiveKnowledge } from "../../adapters/persistence/knowledge.repository";
 import { MapKnowledgeReader } from "../../adapters/knowledge/map-knowledge";
 
@@ -16,7 +16,7 @@ export class TemplateVersionMismatchError extends Error {
   }
 }
 
-function buildSnapshot(a: ActiveKnowledge, limiterWaitMs: number): ExecutionSnapshot {
+function buildSnapshot(a: ActiveKnowledge, limiterWaitMs: number, templateLang: TemplateLang): ExecutionSnapshot {
   // [P10] 재배포 후에도 활성 팩이 현재 질문 템플릿과 호환되는지 확인
   if (a.pack.manifest.templateVersion !== TEMPLATE_VERSION) throw new TemplateVersionMismatchError(a.pack.manifest.templateVersion);
   return {
@@ -25,7 +25,7 @@ function buildSnapshot(a: ActiveKnowledge, limiterWaitMs: number): ExecutionSnap
     policy: { ...a.pack.policy, deadlines: { ...a.pack.policy.deadlines, limiterMs: limiterWaitMs } },
     intents: a.pack.intents,
     helpdesk: a.pack.manifest.helpdesk,
-    templateVersion: TEMPLATE_VERSION,
+    templateVersion: templateVersionLabel(templateLang),
     retriever: new Bm25Retriever(a.faqs, a.chunks),
     knowledge: new MapKnowledgeReader(a.versionId, a.chunks, a.faqs),
   };
@@ -38,13 +38,13 @@ export class SnapshotService {
 
   constructor(
     private readonly loader: { loadActive(): Promise<ActiveKnowledge | null> },
-    private readonly opts: { limiterWaitMs: number },
+    private readonly opts: { limiterWaitMs: number; templateLang: TemplateLang },
   ) {}
 
   /** 활성 팩이 템플릿과 호환되지 않으면 TemplateVersionMismatchError로 부팅을 실패시킨다(조용히 잘못 동작하지 않음). */
   async init(): Promise<void> {
     const a = await this.loader.loadActive();
-    if (a) this.snapshot = buildSnapshot(a, this.opts.limiterWaitMs);
+    if (a) this.snapshot = buildSnapshot(a, this.opts.limiterWaitMs, this.opts.templateLang);
   }
 
   current(): ExecutionSnapshot {
@@ -59,7 +59,7 @@ export class SnapshotService {
         const a = await this.loader.loadActive();
         if (!a) throw new NoActiveKnowledgeError();
         const prev = this.snapshot?.knowledgeVersionId ?? null;
-        const next = buildSnapshot(a, this.opts.limiterWaitMs); // 빌드가 끝난 뒤에만 교체
+        const next = buildSnapshot(a, this.opts.limiterWaitMs, this.opts.templateLang); // 빌드가 끝난 뒤에만 교체
         this.snapshot = next;
         return { versionId: a.versionId, changed: prev !== a.versionId };
       } finally {

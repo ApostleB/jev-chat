@@ -208,3 +208,21 @@ describe("abortableSleep (Codex T3)", () => {
     expect(add).not.toHaveBeenCalled();
   });
 });
+
+describe("TypesafeJudge 템플릿 언어·선택지 순서", () => {
+  const req = { message: "법인카드 한도", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS };
+  it("lang: ko면 한국어 지시문을 보낸다", async () => {
+    const t = new ScriptedTransport([ok(turnAnswers)]);
+    const j = new TypesafeJudge({ transport: t, limiter: limiter(), attemptTimeoutMs: 1000, sleep: noSleep, lang: "ko" });
+    await j.judgeTurn(req, signal());
+    expect(t.sent[0]!.questions.intent!.instructions).toMatch(/분류/);
+  });
+  it("기본은 영어, optionOrder: reversed면 의도 선택지 순서가 뒤집힌다", async () => {
+    const t = new ScriptedTransport([ok(turnAnswers), ok(turnAnswers)]);
+    await judge(t).judgeTurn(req, signal());
+    expect(t.sent[0]!.questions.intent!.instructions).toMatch(/Classify/);
+    const j = new TypesafeJudge({ transport: t, limiter: limiter(), attemptTimeoutMs: 1000, sleep: noSleep, optionOrder: "reversed" });
+    await j.judgeTurn(req, signal());
+    expect(Object.keys(t.sent[1]!.questions.intent!.criteria)[0]).toBe("out_of_scope");
+  });
+});

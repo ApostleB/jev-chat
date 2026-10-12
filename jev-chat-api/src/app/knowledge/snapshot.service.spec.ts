@@ -3,7 +3,7 @@ import { NoActiveKnowledgeError, SnapshotService, TemplateVersionMismatchError }
 import type { ActiveKnowledge } from "../../adapters/persistence/knowledge.repository";
 import { DEFAULT_INTENTS, DEFAULT_POLICY } from "../../core";
 
-const make = (loader: ConstructorParameters<typeof SnapshotService>[0]) => new SnapshotService(loader, { limiterWaitMs: 3000 });
+const make = (loader: ConstructorParameters<typeof SnapshotService>[0]) => new SnapshotService(loader, { limiterWaitMs: 3000, templateLang: "en" });
 
 function active(versionId: string, text = "법인카드 1회 한도 50만 원"): ActiveKnowledge {
   return {
@@ -29,7 +29,7 @@ describe("SnapshotService", () => {
     await s.init();
     const snap = s.current();
     expect(snap.knowledgeVersionId).toBe("v1");
-    expect(snap.templateVersion).toBe("v1");
+    expect(snap.templateVersion).toBe("v1-en");
     expect(snap.retriever.searchChunks(["법인카드 한도"], 8)[0]?.chunk.id).toBe("c1");
     expect(snap.knowledge.getChunk("c1")?.title).toBe("법인카드 규정");
     expect(snap.helpdesk.phone).toBe("1");
@@ -72,7 +72,7 @@ describe("SnapshotService", () => {
   });
 
   it("[P10] 스냅샷 policy의 limiterMs는 서버 설정값", async () => {
-    const s = new SnapshotService({ loadActive: async () => active("v1") }, { limiterWaitMs: 1234 });
+    const s = new SnapshotService({ loadActive: async () => active("v1") }, { limiterWaitMs: 1234, templateLang: "en" });
     await s.init();
     expect(s.current().policy.deadlines.limiterMs).toBe(1234);
   });

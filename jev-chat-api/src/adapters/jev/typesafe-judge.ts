@@ -1,4 +1,5 @@
 import {
+  applyOptionOrder,
   buildRelevanceRequest,
   buildTurnRequest,
   estimateTokens,
@@ -12,6 +13,7 @@ import {
   type JudgeErrorKind,
   type JudgeOutcome,
   type RelevanceRequest,
+  type TemplateLang,
   type TurnJudgeRequest,
   type TurnJudgment,
 } from "../../core";
@@ -30,6 +32,10 @@ interface Deps {
   maxAttempts?: number;
   now?: () => number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** 질문 템플릿 언어(기본 en) */
+  lang?: TemplateLang;
+  /** 평가용: 선택지 순서 뒤집기(기본 normal) */
+  optionOrder?: "normal" | "reversed";
 }
 
 export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -61,14 +67,15 @@ export class TypesafeJudge implements Judge {
   }
 
   judgeTurn(req: TurnJudgeRequest, signal: AbortSignal): Promise<JudgeOutcome<TurnJudgment>> {
-    const payload = buildTurnRequest(req);
-    if (!payload) return Promise.resolve(this.tooLarge("turn"));
+    const built = buildTurnRequest(req, this.deps.lang ?? "en");
+    if (!built) return Promise.resolve(this.tooLarge("turn"));
+    const payload = applyOptionOrder(built, this.deps.optionOrder ?? "normal");
     const sentFaqIds = payload.questions.faq ? Object.keys(payload.questions.faq.criteria).filter((k) => k !== "none") : [];
     return this.call("turn", payload, (answers) => parseTurnAnswers(answers, sentFaqIds), signal);
   }
 
   judgeRelevance(req: RelevanceRequest, signal: AbortSignal): Promise<JudgeOutcome<number>> {
-    const payload = buildRelevanceRequest(req);
+    const payload = buildRelevanceRequest(req, this.deps.lang ?? "en");
     if (!payload) return Promise.resolve(this.tooLarge("relevance", req.chunk.id));
     return this.call("relevance", payload, parseRelevanceAnswer, signal, req.chunk.id);
   }

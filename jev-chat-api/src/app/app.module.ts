@@ -29,7 +29,7 @@ export class AppModule implements OnApplicationBootstrap {
         {
           provide: SnapshotService,
           inject: [KnowledgeRepository],
-          useFactory: (repo: KnowledgeRepository) => new SnapshotService(repo, { limiterWaitMs: env.JEV_LIMITER_WAIT_MS }),
+          useFactory: (repo: KnowledgeRepository) => new SnapshotService(repo, { limiterWaitMs: env.JEV_LIMITER_WAIT_MS, templateLang: env.JEV_TEMPLATE_LANG }),
         },
         RetentionService,
       ],

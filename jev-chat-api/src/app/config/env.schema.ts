@@ -20,6 +20,7 @@ export const EnvSchema = z
     JEV_MAX_TPS: int(80000),
     JEV_LIMITER_WAIT_MS: int(3000),
     JEV_MAX_RETRY_WAIT_MS: int(2000),
+    JEV_TEMPLATE_LANG: z.enum(["en", "ko"]).default("en"),
     DB_HOST: z.string().min(1),
     DB_PORT: int(3306),
     DB_USER: z.string().min(1),

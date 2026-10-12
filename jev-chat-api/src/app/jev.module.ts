@@ -44,7 +44,7 @@ export const JUDGE = Symbol("JUDGE");
       provide: JUDGE,
       inject: [ENV, JevLimiter, JEV_TRANSPORT],
       useFactory: (env: Env, limiter: JevLimiter, transport: JevTransport): Judge =>
-        new TypesafeJudge({ transport, limiter, attemptTimeoutMs: env.JEV_ATTEMPT_TIMEOUT_MS, maxRetryWaitMs: env.JEV_MAX_RETRY_WAIT_MS }),
+        new TypesafeJudge({ transport, limiter, attemptTimeoutMs: env.JEV_ATTEMPT_TIMEOUT_MS, maxRetryWaitMs: env.JEV_MAX_RETRY_WAIT_MS, lang: env.JEV_TEMPLATE_LANG }),
     },
   ],
   exports: [JevLimiter, JUDGE],
