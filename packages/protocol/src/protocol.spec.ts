@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   AckSchema,
   ChatDoneEventSchema,
+  ChatErrorEventSchema,
   ChatSendRequestSchema,
+  ChatStatusEventSchema,
+  SessionStartRequestSchema,
   ChatSendResponseSchema,
   ChatTraceEventSchema,
   MessageTextSchema,
   RouteSchema,
   SessionStartResponseSchema,
   TurnPageSchema,
+  UuidSchema,
   TurnSchema,
   isWithinPayloadLimit,
   MAX_PAYLOAD_BYTES,
@@ -157,6 +161,27 @@ describe("TurnPageSchema (REST 턴 목록)", () => {
     expect(TurnPageSchema.safeParse({ turns: many, hasMore: false }).success).toBe(false);
     expect(SessionStartResponseSchema.safeParse({ sessionId: uuid, turns: many, hasMore: false }).success).toBe(false);
     expect(SessionStartResponseSchema.safeParse({ sessionId: uuid, turns: [turn(2), turn(1)], hasMore: false }).success).toBe(false);
+  });
+});
+
+describe("UUID 소문자 정규화 (Q1)", () => {
+  const UP = "ABCDEF01-2345-4ABC-8DEF-0123456789AB";
+  const LOW = UP.toLowerCase();
+  it("UuidSchema는 대문자 입력을 소문자로 정규화하고 출력 타입은 string", () => {
+    const out: string = UuidSchema.parse(UP);
+    expect(out).toBe(LOW);
+    expect(UuidSchema.safeParse("not-a-uuid").success).toBe(false);
+  });
+  it("요청·응답·이벤트의 모든 uuid 필드에 적용된다", () => {
+    expect(SessionStartRequestSchema.parse({ sessionId: UP, beforeTurnSeq: 3 })).toEqual({ sessionId: LOW, beforeTurnSeq: 3 });
+    expect(ChatSendRequestSchema.parse({ sessionId: UP, clientMsgId: UP, text: "q", retryOfTurnSeq: 1 })).toMatchObject({ sessionId: LOW, clientMsgId: LOW });
+    const turn = { turnId: "t1", turnSeq: 1, clientMsgId: UP, userText: "q", status: "processing" as const };
+    expect(SessionStartResponseSchema.parse({ sessionId: UP, turns: [turn], hasMore: false })).toMatchObject({ sessionId: LOW, turns: [{ clientMsgId: LOW }] });
+    expect(TurnPageSchema.parse({ turns: [turn], hasMore: false }).turns[0]?.clientMsgId).toBe(LOW);
+    expect(ChatStatusEventSchema.parse({ sessionId: UP, clientMsgId: UP, turnSeq: 1, stage: "queued" })).toMatchObject({ sessionId: LOW, clientMsgId: LOW });
+    expect(ChatErrorEventSchema.parse({ sessionId: UP, clientMsgId: UP, turnSeq: 1, code: "INTERNAL", retryable: false, message: "m" })).toMatchObject({ sessionId: LOW, clientMsgId: LOW });
+    expect(ChatDoneEventSchema.parse({ sessionId: UP, clientMsgId: UP, turnSeq: 1, turnId: "t", text: "a", route: "faq", sources: [], traceId: "x" })).toMatchObject({ sessionId: LOW, clientMsgId: LOW });
+    expect(ChatTraceEventSchema.parse({ sessionId: UP, traceId: "x", trace: {} }).sessionId).toBe(LOW);
   });
 });
 

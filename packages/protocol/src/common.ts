@@ -5,7 +5,8 @@ export const SUPPORTED_PROTOCOL_VERSIONS = [1] as const;
 export const MAX_PAYLOAD_BYTES = 8192;
 export const MAX_TEXT_CODEPOINTS = 1000;
 
-export const UuidSchema = z.uuid();
+/** 입력 표기와 무관하게 소문자 canonical로 정규화한다(출력 타입은 string). DB 비교(대소문자 무시)와 서버 키가 어긋나지 않게 한다. */
+export const UuidSchema = z.uuid().overwrite((s) => s.toLowerCase());
 
 export const MessageTextSchema = z
   .string()
