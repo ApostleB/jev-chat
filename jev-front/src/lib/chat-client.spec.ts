@@ -248,3 +248,82 @@ describe("ChatClient — 세대 [U3]", () => {
     expect(c.actions.length).toBe(before);
   });
 });
+
+describe("ChatClient — resume 실패 [P2]", () => {
+  it.each(["NOT_FOUND", "FORBIDDEN"] as const)("resume 동기화가 %s이면 알리고 새 세션으로 다시 시작", async (code) => {
+    const c = setup(sid);
+    const invalid: number[] = [];
+    const client = new ChatClient({
+      url: "http://api.test", token: "t", dispatch: (a) => c.actions.push(a), onConn: () => {}, onSession: (s) => c.sessions.push(s),
+      onResumeInvalid: () => invalid.push(1), resumeSessionId: sid, ioFactory: () => c.sock as never,
+    });
+    let call = 0;
+    c.sock.ackResponder = () => (++call === 1 ? { ok: false, error: { code, message: "x", retryable: false } } : startOk(sid2));
+    client.connect();
+    c.sock.serverEmit("connect");
+    await tick();
+    await tick();
+    expect(c.sock.emitted.map((e) => e.payload)).toEqual([{ sessionId: sid }, {}]);
+    expect(invalid).toHaveLength(1);
+    expect(c.sessions.at(-1)).toEqual({ kind: "ready", sessionId: sid2 });
+    expect(c.sessions).not.toContainEqual({ kind: "error", code });
+  });
+
+  it("resume가 아닌 일반 동기화의 FORBIDDEN은 그대로 error", async () => {
+    const c = setup();
+    c.sock.ackResponder = () => ({ ok: false, error: { code: "NOT_FOUND", message: "x", retryable: false } });
+    await ready(c);
+    expect(c.sock.emitted).toHaveLength(1);
+    expect(c.sessions.at(-1)).toEqual({ kind: "error", code: "NOT_FOUND" });
+  });
+
+  it("resume의 다른 오류(INTERNAL)는 저장값을 지우지 않고 error", async () => {
+    const c = setup(sid);
+    c.sock.ackResponder = () => ({ ok: false, error: { code: "INTERNAL", message: "x", retryable: true } });
+    await ready(c);
+    expect(c.sessions.at(-1)).toEqual({ kind: "error", code: "INTERNAL" });
+    expect(c.sock.emitted).toHaveLength(1);
+  });
+});
+
+describe("ChatClient — UUID 정규화 [P4]", () => {
+  const upper = (s: string) => s.toUpperCase();
+
+  it("서버가 대문자 UUID를 보내도 소문자로 파싱된 값이 리듀서로 간다", async () => {
+    const c = setup();
+    c.sock.ackResponder = () => startOk(upper(sid));
+    await ready(c);
+    expect(c.actions).toContainEqual({ type: "hydrate", sessionId: sid, turns: [] });
+    expect(c.client.sessionId).toBe(sid);
+    c.sock.serverEmit("chat:done", { ...doneEvt, sessionId: upper(sid), clientMsgId: upper(cid(1)) });
+    expect(c.actions.at(-1)).toMatchObject({ type: "done", e: { sessionId: sid, clientMsgId: cid(1) } });
+    c.sock.serverEmit("chat:trace", { sessionId: upper(sid), traceId: "tr1", trace: {} });
+    expect(c.actions.at(-1)).toMatchObject({ type: "trace", e: { sessionId: sid } });
+  });
+
+  it("대문자 resumeSessionId는 소문자로 보내고, UUID가 아니면 새 세션으로 시작", async () => {
+    const a = setup(upper(sid));
+    await ready(a);
+    expect(a.sock.emitted[0]).toEqual({ event: "session:start", payload: { sessionId: sid } });
+    const b = setup("garbage");
+    await ready(b);
+    expect(b.sock.emitted[0]).toEqual({ event: "session:start", payload: {} });
+  });
+
+  it("대문자 clientMsgId 복구 재전송도 소문자로 보내고 localSend/ack는 같은 소문자 ID", async () => {
+    const c = setup();
+    await ready(c);
+    await c.client.send("q", { clientMsgId: upper(cid(7)) });
+    expect(c.sock.emitted.at(-1)?.payload).toMatchObject({ sessionId: sid, clientMsgId: cid(7) });
+    const sends = c.actions.filter((a) => a.type === "localSend" || a.type === "ack");
+    expect(sends.map((a) => (a as { clientMsgId: string }).clientMsgId)).toEqual([cid(7), cid(7)]);
+  });
+
+  it("UUID 형식이 아닌 clientMsgId는 보내지 않는다", async () => {
+    const c = setup();
+    await ready(c);
+    const before = c.sock.emitted.length;
+    await expect(c.client.send("q", { clientMsgId: "nope" })).rejects.toThrow();
+    expect(c.sock.emitted.length).toBe(before);
+  });
+});

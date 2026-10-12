@@ -9,6 +9,7 @@ import {
   ErrorCodeSchema,
   MessageTextSchema,
   PROTOCOL_VERSION,
+  UuidSchema,
   SessionStartAckSchema,
   type ErrorCode,
 } from "@jev-chat/protocol";
@@ -50,6 +51,8 @@ export interface ChatClientOptions {
   onHistory?: (m: HistoryMeta, mode: "sync" | "older") => void;
   onProtocolError?: (where: string) => void;
   resumeSessionId?: string;
+  /** [P2] resume 동기화가 NOT_FOUND/FORBIDDEN이라 저장된 sessionId를 버려야 할 때 */
+  onResumeInvalid?: () => void;
   ioFactory?: IoFactory;
   newId?: () => string;
 }
@@ -71,7 +74,9 @@ export class ChatClient {
 
   constructor(private readonly opts: ChatClientOptions) {
     this.newId = opts.newId ?? (() => crypto.randomUUID());
-    this.currentSession = opts.resumeSessionId ?? null;
+    // [P4] 저장값도 protocol 스키마로 파싱한 소문자 canonical만 쓴다(형식이 틀리면 새 세션)
+    const resume = opts.resumeSessionId === undefined ? null : UuidSchema.safeParse(opts.resumeSessionId);
+    this.currentSession = resume?.success ? resume.data : null;
   }
 
   get sessionId(): string | null {
@@ -146,7 +151,14 @@ export class ChatClient {
       .catch(() => UNCERTAIN);
     if (conn !== this.connGen || sync !== this.syncGen) return false; // [U3] 오래된 응답
     if (mode === "older" && sessionId !== this.currentSession) return false;
-    const fail = (code: ErrorCode) => {
+    const fail = (code: ErrorCode): boolean | Promise<boolean> => {
+      if (mode === "sync" && sessionId && (code === "NOT_FOUND" || code === "FORBIDDEN")) {
+        // [P2] 이어가려던 세션을 쓸 수 없음 → 저장값을 버리고 새 세션으로 시작
+        this.opts.onResumeInvalid?.();
+        this.currentSession = null;
+        this.opts.dispatch({ type: "reset" });
+        return this.startSession(undefined, undefined, "sync");
+      }
       if (mode === "sync") this.opts.onSession({ kind: "error", code });
       return false;
     };
@@ -188,7 +200,10 @@ export class ChatClient {
     const sid = this.currentSession;
     if (!s || !sid || !this.ready) throw new Error("대화 세션이 준비되지 않았습니다."); // [U4]
     const conn = this.connGen;
-    const clientMsgId = opts.clientMsgId ?? this.newId();
+    // [P4] 복구 재전송 ID도 소문자 canonical로 맞춘다(localSend·ack·전송 payload가 같은 값)
+    const idParsed = UuidSchema.safeParse(opts.clientMsgId ?? this.newId());
+    if (!idParsed.success) throw new Error("clientMsgId 형식 오류");
+    const clientMsgId = idParsed.data;
     this.opts.dispatch({ type: "localSend", sessionId: sid, clientMsgId, text: parsed.data });
     const raw = await s
       .timeout(ACK_TIMEOUT)
