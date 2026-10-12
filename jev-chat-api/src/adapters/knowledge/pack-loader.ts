@@ -63,6 +63,13 @@ function duplicates(ids: string[]): string[] {
   return [...new Set(ids.filter((id) => (seen.has(id) ? true : (seen.add(id), false))))];
 }
 
+/** id 오름차순 비교(JS 코드 단위). 파일/DB 로드가 같은 순서를 내도록 하는 단일 기준이다(DB collation에 의존하지 않음). */
+export const compareById = (a: { id: string } | string, b: { id: string } | string): number => {
+  const x = typeof a === "string" ? a : a.id;
+  const y = typeof b === "string" ? b : b.id;
+  return x < y ? -1 : x > y ? 1 : 0;
+};
+
 export async function loadDomainPack(dir: string): Promise<DomainPack> {
   const issues: string[] = [];
   const manifest = await readYaml(dir, "manifest.yaml", ManifestSchema, issues);
@@ -82,6 +89,9 @@ export async function loadDomainPack(dir: string): Promise<DomainPack> {
   }
   if (issues.length > 0 || !manifest || !policy || !intents) throw new PackValidationError(issues);
 
+  // 동점 검색 순서가 입력 줄 순서에 좌우되지 않도록 contentHash 계산 전에 id 오름차순으로 정규화한다.
+  chunkLines.sort(compareById);
+  faqLines.sort(compareById);
   const chunks: Chunk[] = chunkLines.map((c) => ({
     id: c.id,
     module: c.module,

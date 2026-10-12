@@ -2,7 +2,7 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadDomainPack, PackValidationError } from "./pack-loader";
+import { compareById, loadDomainPack, PackValidationError } from "./pack-loader";
 
 const MINI = resolve(process.cwd(), "src/adapters/knowledge/__fixtures__/mini-pack");
 
@@ -12,7 +12,34 @@ function copyMini(): string {
   return dir;
 }
 
+const TIE_IDS = ["a-1", "a0", "a1", "ab", "b-2"];
+
+/** id만 다르고 내용이 같은 청크·FAQ(동점)를 가진 임시 팩을 만든다. lines 순서는 호출자가 정한다. */
+function writeTiePack(ids: string[]): string {
+  const dir = copyMini();
+  const chunk = (id: string) => JSON.stringify({ id, module: "경비", kind: "regulation", title: "동점 규정", section: "제1조", text: "동점 검색 본문 한도", tags: [], updated_at: "2026-01-02" });
+  const faq = (id: string) => JSON.stringify({ id: `f-${id}`, intent: "regulation", summary: "동점 검색 요약 한도", applies_when: "항상", answer: "답", source_chunk_id: id, variants: ["동점 검색 한도"] });
+  writeFileSync(join(dir, "chunks.jsonl"), ids.map(chunk).join("\n") + "\n");
+  writeFileSync(join(dir, "faqs.jsonl"), ids.map(faq).join("\n") + "\n");
+  return dir;
+}
+
+describe("compareById", () => {
+  it("JS 코드 단위 오름차순", () => {
+    expect(["b-2", "ab", "a1", "a0", "a-1"].sort(compareById)).toEqual(["a-1", "a0", "a1", "ab", "b-2"]);
+  });
+});
+
 describe("loadDomainPack", () => {
+  it("[R2] 줄 순서가 달라도 같은 내용이면 같은 contentHash와 id 오름차순 순서", async () => {
+    const fwd = await loadDomainPack(writeTiePack(TIE_IDS));
+    const rev = await loadDomainPack(writeTiePack([...TIE_IDS].reverse()));
+    expect(rev.contentHash).toBe(fwd.contentHash);
+    expect(rev.chunks.map((c) => c.id)).toEqual(TIE_IDS);
+    expect(rev.faqs.map((f) => f.id)).toEqual(TIE_IDS.map((i) => `f-${i}`));
+    expect(fwd.chunks.map((c) => c.id)).toEqual(TIE_IDS);
+  });
+
   it("미니 팩을 도메인 타입으로 읽는다", async () => {
     const pack = await loadDomainPack(MINI);
     expect(pack.manifest).toMatchObject({ name: "mini-test", version: "0.0.1", templateVersion: "v1", helpdesk: { phone: "02-000-0000" } });

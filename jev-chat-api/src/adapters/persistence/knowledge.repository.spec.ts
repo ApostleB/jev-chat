@@ -1,4 +1,7 @@
-import { resolve } from "node:path";
+import { cpSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { Bm25Retriever } from "../../core";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { loadDomainPack } from "../knowledge/pack-loader";
 import { KnowledgeRepository } from "./knowledge.repository";
@@ -40,6 +43,26 @@ describe.runIf(prisma)("KnowledgeRepository (통합)", () => {
     expect(old?.status).toBe("archived");
     expect((await prisma!.knowledgeState.findUnique({ where: { id: 1 } }))?.activeVersionId).toBe(v2.versionId);
     expect(await prisma!.knowledgeChunk.count({ where: { versionId: v1.versionId } })).toBe(2);
+  });
+
+  it("[R2] 파일→DB 왕복 후에도 chunks/faqs 순서와 동점 검색 결과가 같다", async () => {
+    // 정렬이 갈릴 만한 id(하이픈·숫자·문자 혼합). 줄 순서는 일부러 뒤섞고, 내용은 모두 같아 BM25 동점이다.
+    const ids = ["b-2", "a1", "ab", "a-1", "a0"];
+    const dir = mkdtempSync(join(tmpdir(), "tie-pack-"));
+    cpSync(MINI, dir, { recursive: true });
+    const chunk = (id: string) => JSON.stringify({ id, module: "경비", kind: "regulation", title: "동점 규정", section: "제1조", text: "동점 검색 본문 한도", tags: [], updated_at: "2026-01-02" });
+    const faq = (id: string) => JSON.stringify({ id: `f-${id}`, intent: "regulation", summary: "동점 검색 요약 한도", applies_when: "항상", answer: "답", source_chunk_id: id, variants: ["동점 검색 한도"] });
+    writeFileSync(join(dir, "chunks.jsonl"), ids.map(chunk).join("\n") + "\n");
+    writeFileSync(join(dir, "faqs.jsonl"), ids.map(faq).join("\n") + "\n");
+    const pack = await loadDomainPack(dir);
+    await repo.importPack(pack);
+    const active = await repo.loadActive();
+    expect(active?.chunks.map((c) => c.id)).toEqual(pack.chunks.map((c) => c.id));
+    expect(active?.faqs.map((f) => f.id)).toEqual(pack.faqs.map((f) => f.id));
+    const fileR = new Bm25Retriever(pack.faqs, pack.chunks);
+    const dbR = new Bm25Retriever(active!.faqs, active!.chunks);
+    expect(dbR.searchChunks(["동점 검색 한도"], 1).map((c) => c.chunk.id)).toEqual(fileR.searchChunks(["동점 검색 한도"], 1).map((c) => c.chunk.id));
+    expect(dbR.searchFaqs("동점 검색 한도", 1).map((c) => c.faq.id)).toEqual(fileR.searchFaqs("동점 검색 한도", 1).map((c) => c.faq.id));
   });
 
   it("active가 없으면 null", async () => {

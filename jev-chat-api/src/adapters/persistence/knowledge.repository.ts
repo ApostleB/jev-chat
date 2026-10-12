@@ -1,6 +1,6 @@
 import type { Chunk, Faq, IntentId } from "../../core";
 import type { PrismaClient } from "../../generated/prisma/client";
-import type { DomainPack } from "../knowledge/pack-loader";
+import { compareById, type DomainPack } from "../knowledge/pack-loader";
 
 export interface ActiveKnowledge {
   versionId: string;
@@ -87,7 +87,8 @@ export class KnowledgeRepository {
     return {
       versionId: v.id,
       pack: v.packSnapshot as unknown as PackSnapshot,
-      chunks: chunkRows.map((c) => ({
+      // DB collation(utf8mb4_unicode_ci) 정렬이 JS와 다를 수 있어 파일 로더와 같은 기준으로 다시 정렬한다.
+      chunks: [...chunkRows].sort(compareById).map((c) => ({
         id: c.id,
         module: c.module,
         kind: c.kind,
@@ -98,7 +99,7 @@ export class KnowledgeRepository {
         updatedAt: c.updatedAt,
         contentHash: c.contentHash,
       })),
-      faqs: faqRows.map((f) => ({
+      faqs: [...faqRows].sort(compareById).map((f) => ({
         id: f.id,
         intent: f.intent as IntentId,
         summary: f.summary,
