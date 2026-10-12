@@ -323,7 +323,7 @@ GET  /api/health
 | 화면 | 기능 | 데이터 |
 |---|---|---|
 | 테스트 채팅 | 채팅 + 오른쪽 **판단 패널**: 의도 확률 막대, in_scope·ambiguity, FAQ 후보 확률, 문서별 BM25 순위 vs Jev 관련도, route, B 상태, 단계별 소요시간, 토큰 | 소켓 + `chat:trace` |
-| 대화 로그 | 세션 표(날짜·route·intent 필터) → 턴 클릭 시 trace 서랍(Sheet) | `/api/sessions`, `/turns`, `/traces/:id` |
+| 대화 로그 | 세션 표(route·intent 필터, 생성 시각 역순 — 날짜 필터는 MVP 제외) → 턴 클릭 시 trace 서랍(Sheet) | `/api/sessions`, `/turns`, `/traces/:id` |
 | 검수 대기 | 검수 대상 턴 목록 → 맞음/틀림/부분 + 정답 intent·FAQ·청크 선택 + 메모 | `/api/reviews/queue`, `POST review` |
 | 지식 데이터 | 활성 버전의 FAQ/청크 읽기 전용 목록 + **"활성 지식 인덱스 다시 로드"** 버튼 | `/api/knowledge/*`, `POST reload` |
 | 설정 | 활성 버전·policy·모델·템플릿 버전 표시, 접속 토큰 입력/로그아웃 | `/api/admin/config` |
