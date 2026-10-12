@@ -219,6 +219,33 @@ describe("ChatService", () => {
     expect(svc.inflightCount()).toBe(0);
   });
 
+  it("[M-4] 판단이 abort를 무시하고 pending이어도 엔진 기한 후 오류 응답(completed, route=error)으로 확정하고 슬롯·세션 체인을 놓는다. 늦은 결과는 저장·발송하지 않는다", async () => {
+    let lateResolve!: () => void;
+    const hang = new Promise<void>((r) => (lateResolve = r));
+    let calls = 0;
+    const judge = new FakeJudge(
+      async () => { if (calls++ === 0) { await hang; } return okTurn({ regulation: 1 }, { faq: { choice: "faq-card", confidence: 0.9, probabilities: { "faq-card": 0.95, none: 0.05 } } }); },
+      async (req) => okRelevance(req.chunk.id, 0.1),
+    );
+    const policy: Policy = { ...DEFAULT_POLICY, deadlines: { ...DEFAULT_POLICY.deadlines, engineMs: 50 } };
+    const { store, svc } = setup({ judge, policy, capacity: 2 });
+    const sid = await session(svc);
+    const ev1 = new Recorder();
+    await send(svc, alice, sid, "법인카드 첫째", ev1);
+    const ev2 = new Recorder();
+    await send(svc, alice, sid, "법인카드 둘째", ev2);
+    await settle(400);
+    expect(ev1.dones[0]).toMatchObject({ route: "error", error: { code: "JEV_UNAVAILABLE", retryable: true } });
+    expect(store.turns[0]).toMatchObject({ status: "completed", route: "error" });
+    expect(store.turns[1]?.status).toBe("completed"); // 체인이 풀려 다음 턴이 진행됨
+    expect(ev2.dones[0]).toMatchObject({ route: "faq" });
+    expect(svc.inflightCount()).toBe(0);
+    lateResolve(); // 늦게 끝난 첫 판단 결과
+    await settle(50);
+    expect(ev1.dones).toHaveLength(1);
+    expect(store.turns[0]).toMatchObject({ status: "completed", route: "error" });
+  });
+
   it("저장 실패 → done을 보내지 않고 chat:error(INTERNAL)", async () => {
     const { store, svc } = setup();
     store.failComplete = true;
