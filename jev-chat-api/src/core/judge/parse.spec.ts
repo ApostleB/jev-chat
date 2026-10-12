@@ -99,6 +99,37 @@ describe("parseTurnAnswers", () => {
       const r = parseIntent(intentWith({ ...full, regulation: 0.895 }));
       expect(r.intent.choice).toBe("regulation");
     });
+    describe("Jev 2자리 반올림 허용 오차", () => {
+      const parseFaq = (faq: unknown, ids: string[]) => parseTurnAnswers({ intent: intentAnswer, ambiguous: noul, faq }, ids);
+      it("실제 거부됐던 응답 1(합계 0.99, n=6)을 통과시킨다", () => {
+        const probabilities = { "faq-acct-after-close": 0.03, "faq-appr-reject": 0.07, "faq-card-limit": 0, "faq-auth-permission-request": 0, "faq-acct-reverse-howto": 0.08, none: 0.81 };
+        const ids = Object.keys(probabilities).filter((k) => k !== "none");
+        const r = parseFaq({ type: "choice", choice: "none", confidence: 0.77, probabilities }, ids);
+        expect(r.faq?.choice).toBe("none");
+      });
+      it("실제 거부됐던 응답 2(합계 0.99, n=6)를 통과시킨다", () => {
+        const probabilities = { "faq-auth-password-policy": 0.02, "faq-auth-password-reset": 0.04, "faq-auth-locked": 0, "faq-appr-delegate": 0, "faq-auth-permission-request": 0, none: 0.93 };
+        const ids = Object.keys(probabilities).filter((k) => k !== "none");
+        const r = parseFaq({ type: "choice", choice: "none", confidence: 0.92, probabilities }, ids);
+        expect(r.faq?.choice).toBe("none");
+      });
+      it("n=6에서 합계 0.97/1.03은 통과, 0.96/1.04는 거부한다", () => {
+        for (const reg of [0.87, 0.93]) expect(parseIntent(intentWith({ ...full, regulation: reg })).intent.choice).toBe("regulation");
+        for (const reg of [0.86, 0.94]) expect(() => parseIntent(intentWith({ ...full, regulation: reg }))).toThrow(JevResponseError);
+      });
+      it("n=2에서 합계 0.99는 통과, 0.98은 거부한다", () => {
+        const mk = (a: number, b: number) => ({ type: "choice", choice: "faq-a", confidence: 0.5, probabilities: { "faq-a": a, none: b } });
+        expect(parseFaq(mk(0.9, 0.09), ["faq-a"]).faq?.choice).toBe("faq-a");
+        expect(() => parseFaq(mk(0.9, 0.08), ["faq-a"])).toThrow(JevResponseError);
+      });
+      it("부동소수점 경계: 여러 값의 합이 0.99인 경우도 통과한다", () => {
+        const probs = { regulation: 0.51, how_to: 0.3, error: 0.1, account_access: 0.05, smalltalk: 0.03, out_of_scope: 0 };
+        const r = parseIntent(intentWith(probs));
+        expect(r.intent.choice).toBe("regulation");
+        const two = { "faq-a": 0.1 + 0.2 + 0.3 + 0.39, none: 0 };
+        expect(parseFaq({ type: "choice", choice: "faq-a", confidence: 1, probabilities: two }, ["faq-a"]).faq?.choice).toBe("faq-a");
+      });
+    });
     it("동점이면 둘 중 어느 쪽 choice든 허용한다", () => {
       const faqAnswer = (choice: string) => ({
         type: "choice",

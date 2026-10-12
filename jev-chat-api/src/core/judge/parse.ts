@@ -22,7 +22,10 @@ function fail(message: string): never {
   throw new JevResponseError(message);
 }
 
-const SUM_TOLERANCE = 0.01;
+// Jev는 확률을 소수 둘째 자리로 반올림해 보낸다(키당 최대 ±0.005 오차). 선택지가 많을수록 합계 오차가 커진다.
+const MIN_SUM_TOLERANCE = 0.01;
+const ROUNDING_STEP_ERROR = 0.005;
+const FLOAT_SLACK = 1e-9;
 const TIE_EPSILON = 1e-6;
 
 function toChoice<T extends string>(raw: unknown, allowed: readonly T[], name: string): ChoiceResult<T> {
@@ -35,7 +38,8 @@ function toChoice<T extends string>(raw: unknown, allowed: readonly T[], name: s
   if (!allowedSet.has(choice)) fail(`${name}: 허용되지 않은 선택지 ${choice}`);
   const values = keys.map((k) => probabilities[k]!);
   const sum = values.reduce((a, b) => a + b, 0);
-  if (Math.abs(sum - 1) > SUM_TOLERANCE) fail(`${name}: 확률 합계 ${sum}`);
+  const tolerance = Math.max(MIN_SUM_TOLERANCE, ROUNDING_STEP_ERROR * keys.length) + FLOAT_SLACK;
+  if (Math.abs(sum - 1) > tolerance) fail(`${name}: 확률 합계 ${sum}`);
   const max = Math.max(...values);
   if (max - probabilities[choice]! > TIE_EPSILON) fail(`${name}: choice가 최고 확률이 아님`);
   return { choice: choice as T, confidence, probabilities: probabilities as Record<T, number> };
