@@ -1039,7 +1039,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - 실행 키는 `TYPESAFE_API_KEY`만 필요(DB 불필요). env는 하네스 전용 스키마로 검증.
 - holdout 원장(`eval/holdout-ledger/*.json`)은 커밋한다.
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `jev-chat-api/src/eval/holdout-lock.spec.ts`:
 ```ts
@@ -1158,9 +1158,9 @@ describe("runEval (FakeJudge)", () => {
 });
 ```
 
-- [ ] **Step 2: 실행 → 실패 확인** — Run: `pnpm --filter jev-chat-api test -- holdout-lock run-eval` → FAIL
+- [x] **Step 2: 실행 → 실패 확인** — Run: `pnpm --filter jev-chat-api test -- holdout-lock run-eval` → FAIL
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 `jev-chat-api/src/eval/fingerprint.ts`:
 ```ts
@@ -1497,9 +1497,9 @@ main()
 ```
 `jev-chat-api/package.json` scripts에 `"eval": "tsx src/eval/cli.ts"` 추가. 루트 `.gitignore`에 `jev-chat-api/eval-reports/` 추가. `tsconfig.build.json`의 `exclude`에 `"src/eval/**"` 추가.
 
-- [ ] **Step 3-1: 전체 흐름 CLI 테스트 [N1]** — `src/eval/holdout-flow.spec.ts`: 임시 git 저장소(`git init`, `jev-chat-api/src/x.ts`·미니 팩·holdout·freeze 커밋)에서 `evalCodeTree` → 원장 예약/완료 파일 생성 → 원장만 커밋 → `evalCodeTree`가 **같은 값**을 돌려주고 `decideHoldout(..., "rerun")`이 허용 / `src` 파일을 바꿔 커밋하면 지문이 달라 거부 / 원장 외 파일을 수정만 하면 `evalCodeTree`가 throw. (실제 Jev 호출 없이 하네스의 예약·지문·결정 함수만 검증)
+- [x] **Step 3-1: 전체 흐름 CLI 테스트 [N1]** — `src/eval/holdout-flow.spec.ts`: 임시 git 저장소(`git init`, `jev-chat-api/src/x.ts`·미니 팩·holdout·freeze 커밋)에서 `evalCodeTree` → 원장 예약/완료 파일 생성 → 원장만 커밋 → `evalCodeTree`가 **같은 값**을 돌려주고 `decideHoldout(..., "rerun")`이 허용 / `src` 파일을 바꿔 커밋하면 지문이 달라 거부 / 원장 외 파일을 수정만 하면 `evalCodeTree`가 throw. (실제 Jev 호출 없이 하네스의 예약·지문·결정 함수만 검증)
 
-- [ ] **Step 4: 실행 → 통과 + 커밋**
+- [x] **Step 4: 실행 → 통과 + 커밋**
 
 Run: `pnpm --filter jev-chat-api test -- eval/ && pnpm --filter jev-chat-api typecheck` → PASS
 ```bash
