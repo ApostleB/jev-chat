@@ -14,6 +14,7 @@ describe("parseTurnAnswers", () => {
       {
         intent: intentAnswer,
         ambiguous: { type: "noul", noul: 0.12 },
+        manipulation: { type: "noul", noul: 0.05 },
         faq: { type: "choice", choice: "faq-a", confidence: 0.8, probabilities: { "faq-a": 0.85, none: 0.15 } },
       },
       ["faq-a"],
@@ -23,8 +24,13 @@ describe("parseTurnAnswers", () => {
     expect(r.faq?.choice).toBe("faq-a");
     expect(r.faq?.probabilities["faq-a"]).toBe(0.85);
   });
+  it("[T3] manipulation noul을 매핑하고, 없으면 형식 오류", () => {
+    const base = { intent: intentAnswer, ambiguous: { type: "noul", noul: 0.1 } };
+    expect(parseTurnAnswers({ ...base, manipulation: { type: "noul", noul: 0.83 } }, []).manipulation).toBe(0.83);
+    expect(() => parseTurnAnswers(base, [])).toThrow(JevResponseError);
+  });
   it("faq 질문을 보내지 않았으면 faq는 null", () => {
-    const r = parseTurnAnswers({ intent: intentAnswer, ambiguous: { type: "noul", noul: 0.1 } }, []);
+    const r = parseTurnAnswers({ intent: intentAnswer, ambiguous: { type: "noul", noul: 0.1 }, manipulation: { type: "noul", noul: 0.05 } }, []);
     expect(r.faq).toBeNull();
   });
   it("후보에 없는 faq choice는 형식 오류", () => {
@@ -33,6 +39,7 @@ describe("parseTurnAnswers", () => {
         {
           intent: intentAnswer,
           ambiguous: { type: "noul", noul: 0.1 },
+          manipulation: { type: "noul", noul: 0.05 },
           faq: { type: "choice", choice: "faq-zzz", confidence: 1, probabilities: { "faq-zzz": 1 } },
         },
         ["faq-a"],
@@ -41,12 +48,12 @@ describe("parseTurnAnswers", () => {
   });
   it("알 수 없는 intent는 형식 오류", () => {
     expect(() =>
-      parseTurnAnswers({ intent: { ...intentAnswer, choice: "weather" }, ambiguous: { type: "noul", noul: 0.1 } }, []),
+      parseTurnAnswers({ intent: { ...intentAnswer, choice: "weather" }, ambiguous: { type: "noul", noul: 0.1 }, manipulation: { type: "noul", noul: 0.05 } }, []),
     ).toThrow(JevResponseError);
   });
   describe("Choice 엄격 검증", () => {
     const noul = { type: "noul", noul: 0.1 };
-    const parseIntent = (intent: unknown) => parseTurnAnswers({ intent, ambiguous: noul }, []);
+    const parseIntent = (intent: unknown) => parseTurnAnswers({ intent, ambiguous: noul, manipulation: noul }, []);
     const intentWith = (probabilities: Record<string, number>, choice = "regulation") => ({
       type: "choice",
       choice,
@@ -85,6 +92,7 @@ describe("parseTurnAnswers", () => {
           {
             intent: intentAnswer,
             ambiguous: noul,
+            manipulation: noul,
             faq: { type: "choice", choice: "faq-a", confidence: 0.8, probabilities: { "faq-a": 0.7, "faq-zzz": 0.2, none: 0.1 } },
           },
           ["faq-a"],
@@ -100,7 +108,7 @@ describe("parseTurnAnswers", () => {
       expect(r.intent.choice).toBe("regulation");
     });
     describe("Jev 2자리 반올림 허용 오차", () => {
-      const parseFaq = (faq: unknown, ids: string[]) => parseTurnAnswers({ intent: intentAnswer, ambiguous: noul, faq }, ids);
+      const parseFaq = (faq: unknown, ids: string[]) => parseTurnAnswers({ intent: intentAnswer, ambiguous: noul, manipulation: noul, faq }, ids);
       it("실제 거부됐던 응답 1(합계 0.99, n=6)을 통과시킨다", () => {
         const probabilities = { "faq-acct-after-close": 0.03, "faq-appr-reject": 0.07, "faq-card-limit": 0, "faq-auth-permission-request": 0, "faq-acct-reverse-howto": 0.08, none: 0.81 };
         const ids = Object.keys(probabilities).filter((k) => k !== "none");
@@ -138,13 +146,13 @@ describe("parseTurnAnswers", () => {
         probabilities: { "faq-a": 0.5, none: 0.5 },
       });
       for (const choice of ["faq-a", "none"]) {
-        const r = parseTurnAnswers({ intent: intentAnswer, ambiguous: noul, faq: faqAnswer(choice) }, ["faq-a"]);
+        const r = parseTurnAnswers({ intent: intentAnswer, ambiguous: noul, manipulation: noul, faq: faqAnswer(choice) }, ["faq-a"]);
         expect(r.faq?.choice).toBe(choice);
       }
     });
     it("경계값 0과 1을 허용한다", () => {
       const probs = { regulation: 1, how_to: 0, error: 0, account_access: 0, smalltalk: 0, out_of_scope: 0 };
-      const r = parseTurnAnswers({ intent: { ...intentWith(probs), confidence: 0 }, ambiguous: { type: "noul", noul: 1 } }, []);
+      const r = parseTurnAnswers({ intent: { ...intentWith(probs), confidence: 0 }, ambiguous: { type: "noul", noul: 1 }, manipulation: { type: "noul", noul: 0 } }, []);
       expect(r.intent.probabilities.regulation).toBe(1);
       expect(r.intent.confidence).toBe(0);
       expect(r.ambiguity).toBe(1);

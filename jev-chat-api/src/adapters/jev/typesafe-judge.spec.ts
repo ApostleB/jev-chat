@@ -25,6 +25,7 @@ class ScriptedTransport implements JevTransport {
 const turnAnswers = {
   intent: { type: "choice", choice: "regulation", confidence: 0.9, probabilities: { regulation: 0.9, how_to: 0.1, error: 0, account_access: 0, smalltalk: 0, out_of_scope: 0 } },
   ambiguous: { type: "noul", noul: 0.1 },
+  manipulation: { type: "noul", noul: 0.05 },
 };
 const ok = (answers: unknown): JevTransportResult => ({ model: "jev-1.13.0", answers, usage: { inputTokens: 100, outputTokens: 5 } });
 
@@ -38,6 +39,7 @@ describe("TypesafeJudge.judgeTurn", () => {
     const r = await judge(t).judgeTurn({ message: "법인카드 한도", recentTurns: [], faqCandidates: [], intents: DEFAULT_INTENTS }, signal());
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.intent.choice).toBe("regulation");
+    if (r.ok) expect(r.value.manipulation).toBe(0.05);
     expect(r.audit).toMatchObject({ call: "turn", status: "ok", attempts: 1, model: "jev-1.13.0", usage: { inputTokens: 100, outputTokens: 5 } });
     expect(r.audit.estimatedInputTokens).toBeGreaterThan(0);
     expect(r.audit.answer).toEqual(turnAnswers);

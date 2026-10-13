@@ -38,6 +38,7 @@ describe("core 단독 실행", () => {
         value: {
           intent: { choice: "regulation", confidence: 0.95, probabilities: { regulation: 0.95, how_to: 0.05, error: 0, account_access: 0, smalltalk: 0, out_of_scope: 0 } },
           ambiguity: 0.05,
+          manipulation: 0.02,
           faq: { choice: "faq-approval", confidence: 0.9, probabilities: { "faq-approval": 0.9, none: 0.1 } },
         },
         audit: { call: "turn", status: "ok", attempts: 1, latencyMs: 1 },

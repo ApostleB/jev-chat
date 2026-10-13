@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ChatEngine, type HandleMessageInput } from "./chat-engine";
 import { ExtractiveAnswerer } from "../answer/extractive";
 import { MESSAGES } from "../answer/messages";
+import { TEMPLATE_VERSION } from "../judge/templates";
 import { chunkFixture, faqFixture } from "../testing/fixtures";
 import {
   failedRelevance,
@@ -158,7 +159,7 @@ describe("ChatEngine", () => {
     const r = await engine(judge).handle(input("법인카드 회식비"));
     expect(r.trace.totalInputTokens).toBe(100 + 50 * judge.relevanceCalls.length);
     expect(r.trace.knowledgeVersionId).toBe("v1");
-    expect(r.trace.templateVersion).toBe("v1");
+    expect(r.trace.templateVersion).toBe(TEMPLATE_VERSION);
     expect(r.trace.model).toBe("jev-1.13.0");
     expect(r.trace.jevCalls.length).toBe(1 + judge.relevanceCalls.length);
   });

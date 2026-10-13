@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { NoActiveKnowledgeError, SnapshotService, TemplateVersionMismatchError } from "./snapshot.service";
 import type { ActiveKnowledge } from "../../adapters/persistence/knowledge.repository";
-import { DEFAULT_INTENTS, DEFAULT_POLICY } from "../../core";
+import { DEFAULT_INTENTS, DEFAULT_POLICY, TEMPLATE_VERSION } from "../../core";
 
 const make = (loader: ConstructorParameters<typeof SnapshotService>[0]) => new SnapshotService(loader, { limiterWaitMs: 3000, templateLang: "en" });
 
@@ -9,7 +9,7 @@ function active(versionId: string, text = "법인카드 1회 한도 50만 원"):
   return {
     versionId,
     pack: {
-      manifest: { name: "t", version: "1", language: "ko", helpdesk: { phone: "1", email: "e" }, templateVersion: "v1" },
+      manifest: { name: "t", version: "1", language: "ko", helpdesk: { phone: "1", email: "e" }, templateVersion: TEMPLATE_VERSION },
       policy: DEFAULT_POLICY,
       intents: DEFAULT_INTENTS,
     },
@@ -29,7 +29,7 @@ describe("SnapshotService", () => {
     await s.init();
     const snap = s.current();
     expect(snap.knowledgeVersionId).toBe("v1");
-    expect(snap.templateVersion).toBe("v1-en");
+    expect(snap.templateVersion).toBe("v2-en");
     expect(snap.retriever.searchChunks(["법인카드 한도"], 8)[0]?.chunk.id).toBe("c1");
     expect(snap.knowledge.getChunk("c1")?.title).toBe("법인카드 규정");
     expect(snap.helpdesk.phone).toBe("1");

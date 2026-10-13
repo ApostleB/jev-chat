@@ -11,10 +11,10 @@ function probs(p: Partial<Record<IntentId, number>>): Record<IntentId, number> {
   return { regulation: 0, how_to: 0, error: 0, account_access: 0, smalltalk: 0, out_of_scope: 0, ...p };
 }
 
-function turn(p: Partial<Record<IntentId, number>>, ambiguity = 0, faq: TurnJudgment["faq"] = null): JudgeOutcome<TurnJudgment> {
+function turn(p: Partial<Record<IntentId, number>>, ambiguity = 0, faq: TurnJudgment["faq"] = null, manipulation = 0): JudgeOutcome<TurnJudgment> {
   const probabilities = probs(p);
   const choice = (Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]![0]) as IntentId;
-  return { ok: true, audit, value: { intent: { choice, probabilities, confidence: 0.9 }, ambiguity, faq } };
+  return { ok: true, audit, value: { intent: { choice, probabilities, confidence: 0.9 }, ambiguity, manipulation, faq } };
 }
 
 const faqA = faqFixture({ id: "faq-a" });

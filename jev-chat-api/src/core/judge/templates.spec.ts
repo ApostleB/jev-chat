@@ -48,6 +48,18 @@ describe("buildTurnRequest", () => {
     expect(q.type).toBe("noul");
     expect(Object.keys(q.criteria)).toEqual(["true", "false"]);
   });
+  it("[T3] manipulation은 noul이고 질문 순서는 intent, ambiguous, manipulation, faq", () => {
+    const q = req.questions.manipulation!;
+    expect(q.type).toBe("noul");
+    expect(Object.keys(q.criteria)).toEqual(["true", "false"]);
+    expect(q.instructions).toMatch(/manipulate/);
+    expect(Object.keys(req.questions)).toEqual(["intent", "ambiguous", "manipulation", "faq"]);
+  });
+  it("[T3] manipulation 질문은 state+최장 질문 한도에 영향을 주지 않는다", () => {
+    const { manipulation: _m, ...rest } = req.questions;
+    expect(checkRequestSize(req).stateAndLongest).toBe(checkRequestSize({ ...req, questions: rest }).stateAndLongest);
+    expect(checkRequestSize(req).total - checkRequestSize({ ...req, questions: rest }).total).toBe(estimateTokens(req.questions.manipulation));
+  });
   it("faq는 후보 id + none", () => {
     expect(Object.keys(req.questions.faq!.criteria)).toEqual(["faq-a", "faq-b", "none"]);
   });
@@ -235,8 +247,17 @@ describe("템플릿 언어", () => {
     expect(Object.keys(a.questions.faq!.criteria).at(-1)).toBe("none");
     expect((a.state.faq_candidates as unknown[]).length).toBeLessThan(2);
   });
+  it("[T3] ko manipulation 질문", () => {
+    const r = buildTurnRequest({ message: "x", recentTurns: [], faqCandidates, intents: DEFAULT_INTENTS }, "ko")!;
+    expect(r.questions.manipulation!.instructions).toMatch(/조종|지시/);
+    expect((r.questions.manipulation!.criteria as { true: string }).true).toMatch(/우회|지시/);
+  });
+  it("[E3] applyOptionOrder는 manipulation을 건드리지 않는다", () => {
+    const r = buildTurnRequest({ message: "x", recentTurns: [], faqCandidates, intents: DEFAULT_INTENTS })!;
+    expect(applyOptionOrder(r, "reversed").questions.manipulation).toEqual(r.questions.manipulation);
+  });
   it("버전 라벨", () => {
-    expect(templateVersionLabel("en")).toBe("v1-en");
-    expect(templateVersionLabel("ko")).toBe("v1-ko");
+    expect(templateVersionLabel("en")).toBe("v2-en");
+    expect(templateVersionLabel("ko")).toBe("v2-ko");
   });
 });

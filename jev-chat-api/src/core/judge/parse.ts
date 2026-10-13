@@ -60,8 +60,9 @@ export function parseTurnAnswers(answers: unknown, faqCandidateIds: string[]): T
   const a = asRecord(answers);
   const intent = toChoice<IntentId>(a.intent, INTENT_IDS, "intent");
   const ambiguity = toNoul(a.ambiguous, "ambiguous");
+  const manipulation = toNoul(a.manipulation, "manipulation");
   const faq = faqCandidateIds.length === 0 ? null : toChoice<string>(a.faq, [...faqCandidateIds, "none"], "faq");
-  return { intent, ambiguity, faq };
+  return { intent, ambiguity, manipulation, faq };
 }
 
 export function parseRelevanceAnswer(answers: unknown): number {

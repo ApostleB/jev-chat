@@ -156,7 +156,7 @@ describe.runIf(enabled)("REST E2E (통합)", () => {
   it("관리: config 조회, 지식 목록, 재로드", async () => {
     expect((await get("/api/admin/config", "alice")).status).toBe(403);
     const cfg = AdminConfigSchema.parse(await (await get("/api/admin/config", "admin")).json());
-    expect(cfg).toMatchObject({ packName: "mini-test", model: "jev-1.13.0", templateVersion: "v1-en" });
+    expect(cfg).toMatchObject({ packName: "mini-test", model: "jev-1.13.0", templateVersion: "v2-en" });
     const chunks = (await (await get("/api/knowledge/chunks", "admin")).json()) as { items: { id: string }[] };
     expect(chunks.items.map((c: { id: string }) => c.id)).toContain("card-001");
     const reload = await post("/api/admin/knowledge/reload", "admin");

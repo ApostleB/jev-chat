@@ -24,6 +24,7 @@ export interface ChoiceResult<T extends string> {
 export interface TurnJudgment {
   intent: ChoiceResult<IntentId>;
   ambiguity: number;
+  manipulation: number;
   /** FAQ id 또는 "none". FAQ 후보가 없어 질문을 생략했으면 null */
   faq: ChoiceResult<string> | null;
 }

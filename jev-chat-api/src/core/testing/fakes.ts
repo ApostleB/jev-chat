@@ -32,13 +32,13 @@ export function probs(p: Partial<Record<IntentId, number>>): Record<IntentId, nu
 
 export function okTurn(
   p: Partial<Record<IntentId, number>>,
-  opts: { ambiguity?: number; faq?: TurnJudgment["faq"]; inputTokens?: number } = {},
+  opts: { ambiguity?: number; manipulation?: number; faq?: TurnJudgment["faq"]; inputTokens?: number } = {},
 ): JudgeOutcome<TurnJudgment> {
   const probabilities = probs(p);
   const choice = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]![0] as IntentId;
   return {
     ok: true,
-    value: { intent: { choice, probabilities, confidence: 0.9 }, ambiguity: opts.ambiguity ?? 0, faq: opts.faq ?? null },
+    value: { intent: { choice, probabilities, confidence: 0.9 }, ambiguity: opts.ambiguity ?? 0, manipulation: opts.manipulation ?? 0, faq: opts.faq ?? null },
     audit: { call: "turn", status: "ok", attempts: 1, latencyMs: 5, model: "jev-1.13.0", usage: { inputTokens: opts.inputTokens ?? 100, outputTokens: 10 } },
   };
 }

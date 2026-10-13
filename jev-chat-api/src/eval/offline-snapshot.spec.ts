@@ -13,7 +13,7 @@ describe("오프라인 스냅샷", () => {
     expect(snap.retriever.searchFaqs("법인카드 한도", 5)[0]?.faq.id).toBe("faq-card-limit");
     expect(snap.policy.faq).toBe(0.7);
     expect(snap.policy.deadlines.limiterMs).toBe(3000);
-    expect(snap.templateVersion).toBe("v1-ko");
+    expect(snap.templateVersion).toBe("v2-ko");
   });
   it("ItemContextReader: 완료 턴, 출처 ID → title/section", async () => {
     const pack = await loadDomainPack(MINI);

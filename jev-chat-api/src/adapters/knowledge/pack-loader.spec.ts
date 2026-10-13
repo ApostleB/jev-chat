@@ -42,7 +42,7 @@ describe("loadDomainPack", () => {
 
   it("미니 팩을 도메인 타입으로 읽는다", async () => {
     const pack = await loadDomainPack(MINI);
-    expect(pack.manifest).toMatchObject({ name: "mini-test", version: "0.0.1", templateVersion: "v1", helpdesk: { phone: "02-000-0000" } });
+    expect(pack.manifest).toMatchObject({ name: "mini-test", version: "0.0.1", templateVersion: "v2", helpdesk: { phone: "02-000-0000" } });
     expect(pack.policy.inScope).toEqual({ block: 0.4, clarify: 0.6 });
     expect(pack.policy.context).toEqual({ maxTurns: 2, assistantMaxChars: 300 });
     expect(pack.intents.map((i) => i.id)).toEqual(["regulation", "how_to", "error", "account_access", "smalltalk", "out_of_scope"]);
@@ -95,7 +95,7 @@ describe("loadDomainPack", () => {
   it("template_version이 코드와 다르면 거부", async () => {
     const dir = copyMini();
     const p = join(dir, "manifest.yaml");
-    writeFileSync(p, readFileSync(p, "utf8").replace("template_version: v1", "template_version: v9"));
+    writeFileSync(p, readFileSync(p, "utf8").replace("template_version: v2", "template_version: v9"));
     await expect(loadDomainPack(dir)).rejects.toThrow(/template_version/);
   });
 

@@ -1,7 +1,7 @@
 name: hanbit-erp
 version: 0.1.1
 language: ko
-template_version: v1
+template_version: v2
 helpdesk:
   phone: 02-0000-0000
   email: help@hanbit.example
