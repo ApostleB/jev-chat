@@ -12,7 +12,7 @@ export interface ScoredChunk {
 export type RouteDecision =
   | { route: "error"; reason: "turn_failed" | "relevance_failed" }
   | { route: "blocked"; variant: "smalltalk" | "out_of_scope" }
-  | { route: "clarify"; reason: "scope" | "ambiguous" }
+  | { route: "clarify"; reason: "scope" | "ambiguous" | "manipulation" }
   | { route: "faq"; faq: Faq }
   | { route: "extractive"; chunks: Chunk[] }
   | { route: "reference"; chunk: Chunk }
@@ -36,12 +36,13 @@ export function decideFromTurn(
   faqCandidates: FaqCandidate[],
 ): RouteDecision | null {
   if (!turn || !turn.ok) return { route: "error", reason: "turn_failed" };
-  const { intent, ambiguity, faq } = turn.value;
+  const { intent, ambiguity, manipulation, faq } = turn.value;
   const inScope = inScopeProbability(intent.probabilities);
   if (inScope < policy.inScope.block) {
     const p = intent.probabilities;
     return { route: "blocked", variant: p.smalltalk >= p.out_of_scope ? "smalltalk" : "out_of_scope" };
   }
+  if (manipulation >= policy.manipulation) return { route: "clarify", reason: "manipulation" };
   if (inScope < policy.inScope.clarify) return { route: "clarify", reason: "scope" };
   if (ambiguity >= policy.ambiguous) return { route: "clarify", reason: "ambiguous" };
   if (faq && faq.choice !== "none" && (faq.probabilities[faq.choice] ?? 0) >= policy.faq) {

@@ -5,6 +5,7 @@ export const MESSAGES = {
   multipleProvisions: "관련 조항이 여러 개입니다. 적용 조건을 확인하세요.",
   referenceIntro: "정확히 일치하는 규정은 찾지 못했습니다. 관련될 수 있는 문서입니다.",
   clarifyScope: "HB-ERP 관련 질문인지 조금 더 자세히 알려주세요.",
+  clarifyManipulation: "챗봇에 대한 지시는 처리할 수 없습니다. 궁금한 HB-ERP 규정이나 사용법만 다시 질문해 주세요.",
   clarifyAmbiguous: "어떤 항목을 말씀하시는지 구체적으로 알려주세요.",
   smalltalk: "안녕하세요! HB-ERP 규정이나 사용 방법을 물어보시면 안내해 드릴게요.",
   outOfScope: "죄송합니다. 저는 HB-ERP 규정과 사용 방법만 안내할 수 있어요.",

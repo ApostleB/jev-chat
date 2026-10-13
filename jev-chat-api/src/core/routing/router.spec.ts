@@ -20,6 +20,22 @@ function turn(p: Partial<Record<IntentId, number>>, ambiguity = 0, faq: TurnJudg
 const faqA = faqFixture({ id: "faq-a" });
 const faqCands = [{ faq: faqA, bm25Rank: 1, bm25Score: 2 }];
 
+describe("규칙 2b manipulation [T3]", () => {
+  it("in_scope < block이면 2b보다 규칙 2(blocked)가 먼저", () => {
+    expect(decideFromTurn(P, turn({ out_of_scope: 0.7, regulation: 0.3 }, 0, null, 0.95), faqCands)).toEqual({ route: "blocked", variant: "out_of_scope" });
+  });
+  it("manipulation ≥ 0.7이면 clarify(manipulation) — 규칙 3(scope)보다 먼저, 경계 0.7 포함", () => {
+    expect(decideFromTurn(P, turn({ regulation: 0.5, out_of_scope: 0.5 }, 0, null, 0.7), faqCands)).toEqual({ route: "clarify", reason: "manipulation" });
+  });
+  it("FAQ 확률이 높아도 manipulation이면 FAQ를 확정하지 않는다", () => {
+    const t = turn({ regulation: 1 }, 0, { choice: "faq-a", confidence: 0.9, probabilities: { "faq-a": 0.95, none: 0.05 } }, 0.9);
+    expect(decideFromTurn(P, t, faqCands)).toEqual({ route: "clarify", reason: "manipulation" });
+  });
+  it("0.69면 2b 미적용 → 이후 규칙(ambiguous)로", () => {
+    expect(decideFromTurn(P, turn({ regulation: 1 }, 0.9, null, 0.69), faqCands)).toEqual({ route: "clarify", reason: "ambiguous" });
+  });
+});
+
 describe("inScopeProbability / needsHelpdesk", () => {
   it("ERP 의도 4개의 합", () => {
     expect(inScopeProbability(probs({ regulation: 0.3, how_to: 0.2, error: 0.1, account_access: 0.1, smalltalk: 0.3 }))).toBeCloseTo(0.7);

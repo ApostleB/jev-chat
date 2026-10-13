@@ -19,7 +19,7 @@ function result(text: string, route: EngineResult["route"] = "faq"): EngineResul
     sources: [{ chunkId: "c1", versionId: "v1", contentHash: "h", title: "법인카드 규정", section: "한도" }],
     trace: {
       knowledgeVersionId: "v1", templateVersion: "v1", model: "jev-1.13.0", policy: {} as never, contextTurnSeqs: [],
-      intent: "regulation", intentProbs: null, inScope: 0.95, ambiguity: 0.1, faqChoice: "f", faqProb: 0.9, faqConfidence: 0.8,
+      intent: "regulation", intentProbs: null, inScope: 0.95, ambiguity: 0.1, manipulation: 0.1, faqChoice: "f", faqProb: 0.9, faqConfidence: 0.8,
       route, retrieval: { faqQuery: "q", chunkQueries: ["q"], faqCandidateIds: [], chunkCandidateIds: [] }, candidates: [],
       bStatus: "skipped", jevCalls: [], latencyMs: { retrieval: 1, turn: 1, relevance: null, total: 2 }, totalInputTokens: 123, errorCode: null,
     },
@@ -82,7 +82,8 @@ describe.runIf(prisma)("TurnRepository (통합)", () => {
     expect(await repo.findTurnByClientMsgId(s.id, uuid(1))).toMatchObject({ status: "completed", traceId: done?.traceId });
     const trace = await prisma!.messageTrace.findUnique({ where: { turnId: t.id } });
     expect(trace?.totalInputTokens).toBeNull();
-    const data = trace?.data as { totalInputTokens?: unknown; storage?: { totalInputTokensOutOfRange?: unknown } };
+    const data = trace?.data as { totalInputTokens?: unknown; manipulation?: unknown; storage?: { totalInputTokensOutOfRange?: unknown } };
+    expect(data.manipulation).toBe(0.1);
     expect(data.totalInputTokens).toBe(4_000_000_000);
     expect(data.storage?.totalInputTokensOutOfRange).toBe(true);
   });

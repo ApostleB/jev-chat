@@ -61,6 +61,7 @@ export interface TraceRecord {
   intentProbs: Record<IntentId, number> | null;
   inScope: number | null;
   ambiguity: number | null;
+  manipulation: number | null;
   faqChoice: string | null;
   faqProb: number | null;
   faqConfidence: number | null;
@@ -199,6 +200,7 @@ export class ChatEngine {
         intentProbs: judgment?.intent.probabilities ?? null,
         inScope: judgment ? inScopeProbability(judgment.intent.probabilities) : null,
         ambiguity: judgment?.ambiguity ?? null,
+        manipulation: judgment?.manipulation ?? null,
         faqChoice: judgment?.faq?.choice ?? null,
         faqProb: judgment?.faq ? (judgment.faq.probabilities[judgment.faq.choice] ?? null) : null,
         faqConfidence: judgment?.faq?.confidence ?? null,

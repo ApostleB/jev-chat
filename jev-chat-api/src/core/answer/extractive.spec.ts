@@ -18,6 +18,11 @@ const run = (decision: Parameters<typeof answerer.answer>[0]["decision"], showHe
   answerer.answer({ decision, helpdesk, showHelpdesk, knowledge }, signal);
 
 describe("ExtractiveAnswerer", () => {
+  it("[T3] clarify(manipulation): 고정 안내만, 출처 없음, 헬프데스크 규칙은 그대로", async () => {
+    expect(await run({ route: "clarify", reason: "manipulation" })).toEqual({ text: MESSAGES.clarifyManipulation, sources: [] });
+    const withHelp = await run({ route: "clarify", reason: "manipulation" }, true);
+    expect(withHelp.text).toBe(`${MESSAGES.clarifyManipulation}\n\n${MESSAGES.helpdesk(helpdesk)}`);
+  });
   it("faq: 답변 + 규정 확인 안내 + source chunk 출처", async () => {
     const out = await run({ route: "faq", faq: faqFixture({ id: "f", answer: "회식비는 1인당 5만 원입니다.", sourceChunkId: "card-2" }) });
     expect(out.text).toBe(`회식비는 1인당 5만 원입니다.\n\n${MESSAGES.regulationNotice}`);
