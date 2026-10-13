@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadDomainPack } from "../adapters/knowledge/pack-loader";
+import { Bm25Retriever } from "../core";
 import { loadEvalSet } from "./load-set";
 
 const PACK = resolve(process.cwd(), "domain-pack/hanbit-erp");
@@ -20,6 +21,13 @@ describe("HB-ERP domain-pack 계약", () => {
     expect(pack.policy.ambiguous).toBe(0.88);
     expect(pack.policy.manipulation).toBe(0.7);
     expect(pack.manifest.version).toBe("0.1.1");
+  });
+
+  it("[T5] 어휘 불일치 회귀: '잃어버렸는데' 질의에서 card-009가 상위 8개 안", async () => {
+    const pack = await loadDomainPack(PACK);
+    const r = new Bm25Retriever(pack.faqs, pack.chunks);
+    const top8 = r.searchChunks(["법인카드 잃어버렸는데 어떻게 해야 돼요?"], 8).map((h) => h.chunk.id);
+    expect(top8).toContain("card-009");
   });
 
   it("팩이 검증을 통과하고 분량·분포를 지킨다", async () => {

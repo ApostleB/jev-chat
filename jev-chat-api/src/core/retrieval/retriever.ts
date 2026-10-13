@@ -30,7 +30,7 @@ export class Bm25Retriever implements Retriever {
     this.faqById = new Map(faqs.map((f) => [f.id, f]));
     this.chunkById = new Map(chunks.map((c) => [c.id, c]));
     this.faqIndex = new Bm25Index(faqs.map((f) => ({ id: f.id, text: [f.summary, ...f.variants].join(" ") })));
-    this.chunkIndex = new Bm25Index(chunks.map((c) => ({ id: c.id, text: `${c.title} ${c.section} ${c.text}` })));
+    this.chunkIndex = new Bm25Index(chunks.map((c) => ({ id: c.id, text: `${c.title} ${c.section} ${c.text} ${c.tags.join(" ")}` })));
   }
 
   searchFaqs(query: string, k: number): FaqCandidate[] {

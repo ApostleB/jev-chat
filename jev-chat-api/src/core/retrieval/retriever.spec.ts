@@ -99,3 +99,13 @@ describe("Bm25Retriever.searchChunks", () => {
     expect(r.searchChunks(["zzz"], 8)).toEqual([]);
   });
 });
+
+describe("[T5] Bm25Retriever.searchChunks 색인 필드에 tags 포함", () => {
+  const r = new Bm25Retriever([], [
+    chunkFixture({ id: "tagged", title: "t", section: "s", text: "본문", tags: ["zebra"] }),
+    chunkFixture({ id: "plain", title: "t", section: "s", text: "본문 plain 문서" }),
+  ]);
+  it("tags에만 있는 단어로 검색된다", () => {
+    expect(r.searchChunks(["zebra"], 8).map((h) => h.chunk.id)).toEqual(["tagged"]);
+  });
+});
