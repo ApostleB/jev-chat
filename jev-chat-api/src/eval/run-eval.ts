@@ -16,7 +16,7 @@ import { computeMetrics } from "./metrics";
 import { buildOfflineSnapshot, ItemContextReader } from "./offline-snapshot";
 import { applyPolicyOverride } from "./policy-override";
 import { renderMarkdown } from "./report";
-import { combineRuns, scoreItem, type ItemScore } from "./score";
+import { combineRuns, faqSourceLookupFrom, scoreItem, type ItemScore } from "./score";
 
 type Order = "normal" | "reversed";
 
@@ -49,6 +49,7 @@ async function runOne(o: RunOpts, item: EvalItem, judge: Judge) {
 
 export async function runEval(o: RunOpts): Promise<ItemScore[]> {
   const other: Order = o.optionOrder === "normal" ? "reversed" : "normal";
+  const faqSource = faqSourceLookupFrom(o.pack.faqs);
   const scores: ItemScore[] = new Array(o.items.length);
   let next = 0;
   const worker = async () => {
@@ -56,7 +57,7 @@ export async function runEval(o: RunOpts): Promise<ItemScore[]> {
       const i = next++;
       const item = o.items[i]!;
       if (item.type !== "option_order") {
-        scores[i] = scoreItem(item, await runOne(o, item, o.judgeFor(o.optionOrder)));
+        scores[i] = scoreItem(item, await runOne(o, item, o.judgeFor(o.optionOrder)), faqSource);
         continue;
       }
       const prev = o.reuse?.get(item.id)?.runs;
@@ -64,7 +65,7 @@ export async function runEval(o: RunOpts): Promise<ItemScore[]> {
       const runs = [] as unknown as [ItemScore, ItemScore];
       for (const k of [0, 1] as const) {
         const kept = prev?.[k];
-        runs[k] = kept && kept.failure !== "provider" ? kept : scoreItem(item, await runOne(o, item, o.judgeFor(orders[k]!)));
+        runs[k] = kept && kept.failure !== "provider" ? kept : scoreItem(item, await runOne(o, item, o.judgeFor(orders[k]!)), faqSource);
       }
       scores[i] = combineRuns(runs[0], runs[1]);
     }
