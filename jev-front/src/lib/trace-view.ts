@@ -16,6 +16,7 @@ const TraceSchema = z.object({
   intentProbs: z.record(z.string(), Num).nullable().optional(),
   inScope: Num.nullable().optional(),
   ambiguity: Num.nullable().optional(),
+  manipulation: Num.nullable().optional(),
   faqChoice: z.string().nullable().optional(),
   faqProb: Num.nullable().optional(),
   totalInputTokens: Num.optional(),
@@ -30,6 +31,7 @@ export interface TraceView {
   intents: { id: string; prob: number }[];
   inScope: number | null;
   ambiguity: number | null;
+  manipulation: number | null;
   faqChoice: string | null;
   faqCandidates: { id: string; rank: number; prob: number | null }[];
   chunkCandidates: { id: string; rank: number; relevance: number | null; status: string }[];
@@ -48,6 +50,7 @@ export function toTraceView(raw: unknown): TraceView | null {
     intents: Object.entries(t.intentProbs ?? {}).map(([id, prob]) => ({ id, prob })).sort((a, b) => b.prob - a.prob),
     inScope: t.inScope ?? null,
     ambiguity: t.ambiguity ?? null,
+    manipulation: t.manipulation ?? null,
     faqChoice: t.faqChoice ?? null,
     faqCandidates: t.candidates.filter((c) => c.kind === "faq").map((c) => ({ id: c.id, rank: c.bm25Rank, prob: c.faqProb ?? null })),
     chunkCandidates: t.candidates.filter((c) => c.kind === "chunk").map((c) => ({ id: c.id, rank: c.bm25Rank, relevance: c.relevance ?? null, status: c.status ?? "-" })),

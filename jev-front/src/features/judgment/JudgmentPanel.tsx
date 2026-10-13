@@ -26,7 +26,7 @@ export function JudgmentPanel({ trace }: { trace: unknown }) {
               <span className="text-right tabular-nums">{pct(i.prob)}</span>
             </div>
           ))}
-          <div className="pt-1 text-muted-foreground">in_scope {pct(v.inScope)} · ambiguity {pct(v.ambiguity)}</div>
+          <div className="pt-1 text-muted-foreground">in_scope {pct(v.inScope)} · ambiguity {pct(v.ambiguity)} · manipulation {pct(v.manipulation)}</div>
         </CardContent>
       </Card>
       <Card>

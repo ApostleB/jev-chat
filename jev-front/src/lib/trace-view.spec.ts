@@ -29,4 +29,8 @@ describe("toTraceView", () => {
   it("A 미완료 trace(intentProbs null)도 표시 가능", () => {
     expect(toTraceView({ ...raw, intentProbs: null, intent: null, inScope: null })?.intents).toEqual([]);
   });
+  it("[T3] manipulation 파생값을 읽고, 없으면 null", () => {
+    expect(toTraceView({ ...raw, manipulation: 0.33 })?.manipulation).toBe(0.33);
+    expect(toTraceView(raw)?.manipulation).toBeNull();
+  });
 });
