@@ -122,6 +122,7 @@ export async function loadDomainPack(dir: string): Promise<DomainPack> {
   const packPolicy: Policy = {
     inScope: policy.in_scope,
     ambiguous: policy.ambiguous,
+    manipulation: policy.manipulation,
     faq: policy.faq,
     relevance: policy.relevance,
     helpdesk: policy.helpdesk,

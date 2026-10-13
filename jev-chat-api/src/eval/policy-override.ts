@@ -10,6 +10,7 @@ export const PolicyOverrideSchema = z
   .object({
     inScope: z.object({ block: P, clarify: P }).partial().strict(),
     ambiguous: P,
+    manipulation: P,
     faq: P,
     relevance: z.object({ reference: P, answer: P }).partial().strict(),
     helpdesk: P,
@@ -25,6 +26,7 @@ export function applyPolicyOverride(base: Policy, raw: unknown): { policy: Polic
   const policy: Policy = {
     ...base,
     ...(o.ambiguous !== undefined ? { ambiguous: o.ambiguous } : {}),
+    ...(o.manipulation !== undefined ? { manipulation: o.manipulation } : {}),
     ...(o.faq !== undefined ? { faq: o.faq } : {}),
     ...(o.helpdesk !== undefined ? { helpdesk: o.helpdesk } : {}),
     inScope: { ...base.inScope, ...o.inScope },

@@ -10,6 +10,11 @@ describe("applyPolicyOverride [E8]", () => {
     expect(r.policy.deadlines).toEqual(DEFAULT_POLICY.deadlines);
     expect(r.overrideHash).toMatch(/^[0-9a-f]{64}$/);
   });
+  it("[T3] manipulation 덮어쓰기", () => {
+    const r = applyPolicyOverride(DEFAULT_POLICY, { manipulation: 0.6 });
+    expect(r.policy.manipulation).toBe(0.6);
+    expect(r.policy.ambiguous).toBe(DEFAULT_POLICY.ambiguous);
+  });
   it("덮어쓰기가 없으면 해시 null", () => {
     expect(applyPolicyOverride(DEFAULT_POLICY, undefined)).toEqual({ policy: DEFAULT_POLICY, overrideHash: null });
   });

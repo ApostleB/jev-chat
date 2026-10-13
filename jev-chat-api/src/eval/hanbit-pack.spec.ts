@@ -14,6 +14,14 @@ const norm = (t: string) => t.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
 const userTexts = (i: { message: string; turns: { role: string; text: string }[] }) => [i.message, ...i.turns.filter((t) => t.role === "user").map((t) => t.text)];
 
 describe("HB-ERP domain-pack 계약", () => {
+  it("[T2][T3] policy.yaml 개정값과 팩 버전", async () => {
+    const pack = await loadDomainPack(PACK);
+    expect(pack.policy.inScope).toEqual({ block: 0.25, clarify: 0.6 });
+    expect(pack.policy.ambiguous).toBe(0.88);
+    expect(pack.policy.manipulation).toBe(0.7);
+    expect(pack.manifest.version).toBe("0.1.1");
+  });
+
   it("팩이 검증을 통과하고 분량·분포를 지킨다", async () => {
     const pack = await loadDomainPack(PACK);
     expect(pack.chunks.length).toBeGreaterThanOrEqual(55);

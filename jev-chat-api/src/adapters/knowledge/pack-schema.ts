@@ -16,6 +16,7 @@ export const ManifestSchema = z.object({
 export const PolicySchema = z.object({
   in_scope: z.object({ block: Prob, clarify: Prob }).refine((v) => v.block <= v.clarify, "in_scope.block ≤ in_scope.clarify"),
   ambiguous: Prob,
+  manipulation: Prob,
   faq: Prob,
   relevance: z.object({ reference: Prob, answer: Prob }).refine((v) => v.reference <= v.answer, "relevance.reference ≤ relevance.answer"),
   helpdesk: Prob,

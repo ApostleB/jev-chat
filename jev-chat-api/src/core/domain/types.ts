@@ -41,6 +41,7 @@ export interface Helpdesk {
 export interface Policy {
   inScope: { block: number; clarify: number };
   ambiguous: number;
+  manipulation: number;
   faq: number;
   relevance: { reference: number; answer: number };
   helpdesk: number;

@@ -53,6 +53,15 @@ describe("loadDomainPack", () => {
     expect(pack.contentHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("[T3] policy.manipulation을 읽고, 없으면 거부한다", async () => {
+    const pack = await loadDomainPack(MINI);
+    expect(pack.policy.manipulation).toBe(0.7);
+    const dir = copyMini();
+    const pp = join(dir, "policy.yaml");
+    writeFileSync(pp, readFileSync(pp, "utf8").replace(/^manipulation: .*\n/m, ""));
+    await expect(loadDomainPack(dir)).rejects.toThrow(/manipulation/);
+  });
+
   it("내용이 같으면 contentHash가 같고, 바뀌면 달라진다", async () => {
     const a = await loadDomainPack(MINI);
     const dir = copyMini();

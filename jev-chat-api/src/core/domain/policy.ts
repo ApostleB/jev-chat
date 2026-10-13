@@ -8,6 +8,7 @@ function deepFreeze<T>(o: T): Readonly<T> {
 export const DEFAULT_POLICY: Policy = deepFreeze({
   inScope: { block: 0.4, clarify: 0.6 },
   ambiguous: 0.7,
+  manipulation: 0.7,
   faq: 0.8,
   relevance: { reference: 0.5, answer: 0.8 },
   helpdesk: 0.5,
